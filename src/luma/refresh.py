@@ -20,25 +20,18 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-API_BASE = "https://api2.luma.com"
-FETCH_WINDOW_DAYS = 14
-REQUEST_DELAY_SEC = 0.3
-HARDCODED_CATEGORY_URLS = [
-    "https://luma.com/ai",
-    "https://luma.com/tech",
-    "https://luma.com/sf",
-]
-HARDCODED_CALENDARS = [
-    {"url": "https://luma.com/genai-sf", "calendar_api_id": "cal-JTdFQadEz0AOxyV"},
-    {"url": "https://luma.com/frontiertower", "calendar_api_id": "cal-Sl7q1nHTRXQzjP2"},
-    {"url": "https://luma.com/sf-hardware-meetup", "calendar_api_id": "cal-tFAzNGOZ9xn6kT2"},
-    {"url": "https://luma.com/deepmind", "calendar_api_id": "cal-7Q5A70Bz5Idxopu"},
-    {"url": "https://luma.com/genai-collective", "calendar_api_id": "cal-E74MDlDKBaeAwXK"},
-    {"url": "https://luma.com/sfaiengineers", "calendar_api_id": "cal-EmYs2kgt1D9Gb27"},
-]
-HARDCODED_LAT = "37.33939"
-HARDCODED_LON = "-121.89496"
-PAGINATION_LIMIT = "50"
+from luma.config import (
+    API_BASE,
+    EVENTS_FILENAME_PREFIX,
+    FETCH_WINDOW_DAYS,
+    HARDCODED_CALENDARS,
+    HARDCODED_CATEGORY_URLS,
+    HARDCODED_LAT,
+    HARDCODED_LON,
+    PAGINATION_LIMIT,
+    REQUEST_DELAY_SEC,
+    TIMEZONE_NAME,
+)
 
 
 @dataclass
@@ -298,7 +291,7 @@ def dedupe_by_url(records: list[EventRecord]) -> list[dict[str, Any]]:
 
 def _cache_filename(fetched_at: datetime) -> str:
     stamp = fetched_at.strftime("%Y-%m-%d_%H-%M-%S")
-    return f"events-{stamp}.json"
+    return f"{EVENTS_FILENAME_PREFIX}{stamp}.json"
 
 
 def save_cache(
@@ -317,7 +310,7 @@ def save_cache(
 
 def fetch_all_events(*, retries: int) -> list[dict[str, Any]]:
     now_utc = datetime.now(timezone.utc)
-    today_la = now_utc.astimezone(ZoneInfo("America/Los_Angeles")).replace(
+    today_la = now_utc.astimezone(ZoneInfo(TIMEZONE_NAME)).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
     start_utc = today_la.astimezone(timezone.utc)

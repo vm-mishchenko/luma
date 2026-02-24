@@ -28,8 +28,16 @@ import urllib.error
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from luma.query import (
+from luma.config import (
     CACHE_DIR,
+    CACHE_STALE_HOURS,
+    DEFAULT_WINDOW_DAYS,
+    HARDCODED_LAT,
+    HARDCODED_LON,
+    SEEN_FILE,
+    TIMEZONE_NAME,
+)
+from luma.query import (
     QueryParams,
     QueryValidationError,
     find_latest_cache as _q_find_latest_cache,
@@ -37,15 +45,11 @@ from luma.query import (
     parse_iso8601_utc,
     query_events,
 )
-from luma.refresh import HARDCODED_LAT, HARDCODED_LON, refresh
-
-CACHE_STALE_HOURS = 12
-
-SEEN_FILE = CACHE_DIR / "seen.json"
+from luma.refresh import refresh
 
 
 def format_los_angeles_time(value: str) -> str:
-    dt_la = parse_iso8601_utc(value).astimezone(ZoneInfo("America/Los_Angeles"))
+    dt_la = parse_iso8601_utc(value).astimezone(ZoneInfo(TIMEZONE_NAME))
     month = dt_la.strftime("%b")
     day = dt_la.day
     hour = dt_la.hour % 12 or 12
@@ -54,7 +58,7 @@ def format_los_angeles_time(value: str) -> str:
         time_part = f"{hour}{ampm}"
     else:
         time_part = f"{hour}:{dt_la.minute:02d}{ampm}"
-    today = datetime.now(ZoneInfo("America/Los_Angeles")).date()
+    today = datetime.now(ZoneInfo(TIMEZONE_NAME)).date()
     if dt_la.date() == today:
         weekday = "Today"
     else:
@@ -320,7 +324,9 @@ def cmd_query(args: argparse.Namespace) -> int:
     has_date_args = args.from_date is not None or args.to_date is not None
     output = {
         "generated_at": now_utc.isoformat(),
-        "window_days": args.days if args.days is not None else (14 if not has_date_args else None),
+        "window_days": args.days
+        if args.days is not None
+        else (DEFAULT_WINDOW_DAYS if not has_date_args else None),
         "from_date": args.from_date,
         "to_date": args.to_date,
         "window_start_utc": result.window_start_utc.isoformat(),
@@ -345,7 +351,7 @@ def cmd_query(args: argparse.Namespace) -> int:
     print(f"Top {len(top_n)} events (sorted by {args.sort}):")
     score_width = max((len(f"[{int(item['guest_count'])}]") for item in top_n), default=3)
     date_width = max((len(format_los_angeles_time(item["start_at"])) for item in top_n), default=0)
-    la_tz = ZoneInfo("America/Los_Angeles")
+    la_tz = ZoneInfo(TIMEZONE_NAME)
     bold = "\033[1m"
     dim = "\033[2m"
     reset_ansi = "\033[0m"

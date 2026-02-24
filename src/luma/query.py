@@ -17,8 +17,7 @@ from typing import Any
 
 from zoneinfo import ZoneInfo
 
-CACHE_DIR = pathlib.Path.home() / ".cache" / "luma"
-DEFAULT_WINDOW_DAYS = 14
+from luma.config import CACHE_DIR, DEFAULT_WINDOW_DAYS, EVENTS_CACHE_GLOB, TIMEZONE_NAME
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +67,7 @@ def parse_iso8601_utc(value: str) -> datetime:
 
 
 def is_on_or_after_min_time(start_at: str, min_hour: int) -> bool:
-    dt_la = parse_iso8601_utc(start_at).astimezone(ZoneInfo("America/Los_Angeles"))
+    dt_la = parse_iso8601_utc(start_at).astimezone(ZoneInfo(TIMEZONE_NAME))
     return dt_la.hour >= min_hour
 
 
@@ -80,7 +79,7 @@ def find_latest_cache(cache_dir: pathlib.Path) -> pathlib.Path | None:
     """Return the newest events-*.json cache file, or None if no cache exists."""
     if not cache_dir.is_dir():
         return None
-    candidates = sorted(cache_dir.glob("events-*.json"), reverse=True)
+    candidates = sorted(cache_dir.glob(EVENTS_CACHE_GLOB), reverse=True)
     if not candidates:
         return None
     return candidates[0]
@@ -154,7 +153,7 @@ def query_events(
 
     # -- date window ---------------------------------------------------------
 
-    la_tz = ZoneInfo("America/Los_Angeles")
+    la_tz = ZoneInfo(TIMEZONE_NAME)
     now_utc = datetime.now(timezone.utc)
     today_la = now_utc.astimezone(la_tz).replace(
         hour=0, minute=0, second=0, microsecond=0
