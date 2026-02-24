@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+export PYTHONPATH="$(dirname "$0")/../src${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m luma.cli "$@"
