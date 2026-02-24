@@ -16,7 +16,7 @@ EVENTS_CACHE_GLOB = f"{EVENTS_FILENAME_PREFIX}*.json"
 SEEN_FILENAME = "seen.json"
 
 API_BASE = "https://api2.luma.com"
-FETCH_WINDOW_DAYS = 14
+FETCH_WINDOW_DAYS = 30
 REQUEST_DELAY_SEC = 0.3
 HARDCODED_LAT = "37.33939"
 HARDCODED_LON = "-121.89496"
@@ -32,6 +32,7 @@ HARDCODED_CALENDARS = [
     {"url": "https://luma.com/deepmind", "calendar_api_id": "cal-7Q5A70Bz5Idxopu"},
     {"url": "https://luma.com/genai-collective", "calendar_api_id": "cal-E74MDlDKBaeAwXK"},
     {"url": "https://luma.com/sfaiengineers", "calendar_api_id": "cal-EmYs2kgt1D9Gb27"},
+    {"url": "https://luma.com/datadoghq", "calendar_api_id": "cal-58UTRXnfpeEA6ii"},
 ]
 PAGINATION_LIMIT = "50"
 
