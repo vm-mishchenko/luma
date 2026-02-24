@@ -28,6 +28,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from luma import config
+from luma.chat import cmd_chat
 from luma.config import (
     CACHE_STALE_HOURS,
     DEFAULT_WINDOW_DAYS,
@@ -218,6 +219,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "\n"
             "Subcommands:\n"
             "  luma refresh   Fetch events from all sources and write to cache.\n"
+            "  luma chat      Interactive chat with Luma assistant.\n"
             "  luma [options] Query cached events (default).\n"
             "\n"
             "Cache: <cache-dir>/events-<timestamp>.json"
@@ -259,6 +261,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=5,
         help="Retry attempts for HTTP requests with exponential backoff (default: 5).",
+    )
+    subparsers.add_parser(
+        "chat",
+        help="Interactive chat with Luma assistant.",
     )
     _add_query_args(parser)
     return parser.parse_args(argv)
@@ -398,6 +404,8 @@ def main() -> int:
     config.configure(cache_dir=args.cache_dir)
     if args.command == "refresh":
         return cmd_refresh(args.retries)
+    if args.command == "chat":
+        return cmd_chat()
     return cmd_query(args)
 
 
