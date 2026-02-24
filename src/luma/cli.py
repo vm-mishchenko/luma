@@ -21,7 +21,6 @@ Spec implemented:
 from __future__ import annotations
 
 import argparse
-import fnmatch
 import json
 import pathlib
 import random
@@ -36,9 +35,19 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from luma.query import (
+    CACHE_DIR,
+    QueryParams,
+    QueryResult,
+    QueryValidationError,
+    find_latest_cache as _q_find_latest_cache,
+    is_on_or_after_min_time,
+    load_cache,
+    parse_iso8601_utc,
+    query_events,
+)
 
 API_BASE = "https://api2.luma.com"
-CACHE_DIR = pathlib.Path.home() / ".cache" / "luma"
 CACHE_STALE_HOURS = 12
 FETCH_WINDOW_DAYS = 14
 REQUEST_DELAY_SEC = 0.3
@@ -79,10 +88,6 @@ def extract_slug(url: str) -> str:
     return path
 
 
-def parse_iso8601_utc(value: str) -> datetime:
-    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
-
-
 def format_los_angeles_time(value: str) -> str:
     dt_la = parse_iso8601_utc(value).astimezone(ZoneInfo("America/Los_Angeles"))
     month = dt_la.strftime("%b")
@@ -99,11 +104,6 @@ def format_los_angeles_time(value: str) -> str:
     else:
         weekday = dt_la.strftime("%a")
     return f"{weekday} {month} {day}, {time_part}"
-
-
-def is_on_or_after_min_time(start_at: str, min_hour: int) -> bool:
-    dt_la = parse_iso8601_utc(start_at).astimezone(ZoneInfo("America/Los_Angeles"))
-    return dt_la.hour >= min_hour
 
 
 def request_with_retry(
@@ -358,12 +358,7 @@ def _cache_filename(fetched_at: datetime) -> str:
 
 def find_latest_cache() -> pathlib.Path | None:
     """Return the newest events-*.json cache file, or None if no cache exists."""
-    if not CACHE_DIR.is_dir():
-        return None
-    candidates = sorted(CACHE_DIR.glob("events-*.json"), reverse=True)
-    if not candidates:
-        return None
-    return candidates[0]
+    return _q_find_latest_cache(CACHE_DIR)
 
 
 def save_cache(events: list[dict[str, Any]], fetched_at: datetime) -> pathlib.Path:
@@ -376,12 +371,6 @@ def save_cache(events: list[dict[str, Any]], fetched_at: datetime) -> pathlib.Pa
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
     return path
-
-
-def load_cache(path: pathlib.Path) -> list[dict[str, Any]]:
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return data["events"]
 
 
 def load_seen_urls() -> set[str]:
@@ -639,24 +628,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def cmd_query(args: argparse.Namespace) -> int:
     """Query cached events with filters and display results."""
-    min_time_obj: int | None = None
-    if args.min_time is not None:
-        if args.min_time < 0 or args.min_time > 23:
-            print("Invalid --min-time. Use an integer hour from 0 to 23.", file=sys.stderr)
-            return 2
-        min_time_obj = args.min_time
-    max_time_obj: int | None = None
-    if args.max_time is not None:
-        if args.max_time < 0 or args.max_time > 23:
-            print("Invalid --max-time. Use an integer hour from 0 to 23.", file=sys.stderr)
-            return 2
-        max_time_obj = args.max_time
-
-    title_filter_count = sum(x is not None for x in [args.search, args.regex, args.glob])
-    if title_filter_count > 1:
-        print("--search, --regex, and --glob are mutually exclusive.", file=sys.stderr)
-        return 2
-
     if args.discard and args.show_all:
         print("--discard and --all are mutually exclusive.", file=sys.stderr)
         return 2
@@ -671,70 +642,12 @@ def cmd_query(args: argparse.Namespace) -> int:
         else:
             print("No seen events to clear.", file=sys.stderr)
 
-    regex_pattern: re.Pattern[str] | None = None
-    if args.regex is not None:
-        try:
-            regex_pattern = re.compile(args.regex, re.IGNORECASE)
-        except re.error as err:
-            print(f"Invalid --regex pattern: {err}", file=sys.stderr)
-            return 2
-
-    day_name_to_weekday = {
-        "mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6,
-    }
-    day_filter: set[int] | None = None
-    if args.day:
-        day_filter = set()
-        for token in args.day.split(","):
-            key = token.strip().lower()[:3]
-            if key not in day_name_to_weekday:
-                print(f"Unknown weekday: '{token.strip()}'. Use Mon,Tue,Wed,Thu,Fri,Sat,Sun.", file=sys.stderr)
-                return 2
-            day_filter.add(day_name_to_weekday[key])
-
-    la_tz_parse = ZoneInfo("America/Los_Angeles")
-    has_date_args = args.from_date is not None or args.to_date is not None
-    if args.days is not None and has_date_args:
-        print("--days cannot be used together with --from-date/--to-date.", file=sys.stderr)
-        return 2
-
-    now_utc = datetime.now(timezone.utc)
-    today_la = now_utc.astimezone(la_tz_parse).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
-
-    if has_date_args:
-        def _parse_date(raw: str, flag: str) -> datetime:
-            try:
-                return datetime.strptime(raw, "%Y%m%d").replace(tzinfo=la_tz_parse)
-            except ValueError:
-                print(f"Invalid {flag} format: '{raw}'. Use YYYYMMDD.", file=sys.stderr)
-                raise SystemExit(2)
-
-        if args.from_date is not None:
-            start_utc = _parse_date(args.from_date, "--from-date").astimezone(timezone.utc)
-        else:
-            start_utc = today_la.astimezone(timezone.utc)
-
-        if args.to_date is not None:
-            to_date_la = _parse_date(args.to_date, "--to-date")
-            end_utc = (to_date_la + timedelta(days=1)).astimezone(timezone.utc)
-        else:
-            end_utc = start_utc + timedelta(days=FETCH_WINDOW_DAYS)
-
-        if end_utc <= start_utc:
-            print("--to-date cannot be earlier than --from-date.", file=sys.stderr)
-            return 2
-    else:
-        days = args.days if args.days is not None else 14
-        start_utc = today_la.astimezone(timezone.utc)
-        end_utc = start_utc + timedelta(days=days)
-
     cache_path = find_latest_cache()
     if cache_path is None:
         print("No cached events. Run 'luma refresh' first.", file=sys.stderr)
         return 1
 
+    now_utc = datetime.now(timezone.utc)
     try:
         with open(cache_path, "r", encoding="utf-8") as f:
             cache_meta = json.load(f)
@@ -751,71 +664,38 @@ def cmd_query(args: argparse.Namespace) -> int:
         pass
 
     all_events = load_cache(cache_path)
-
-    deduped = [
-        item for item in all_events
-        if start_utc <= parse_iso8601_utc(item["start_at"]) < end_utc
-    ]
-    deduped = [item for item in deduped if int(item["guest_count"]) >= args.min_guest]
-    if args.max_guest is not None:
-        deduped = [item for item in deduped if int(item["guest_count"]) <= args.max_guest]
-    if min_time_obj is not None:
-        deduped = [item for item in deduped if is_on_or_after_min_time(item["start_at"], min_time_obj)]
-    if max_time_obj is not None:
-        la_tz_max = ZoneInfo("America/Los_Angeles")
-        deduped = [
-            item for item in deduped
-            if parse_iso8601_utc(item["start_at"]).astimezone(la_tz_max).hour <= max_time_obj
-        ]
-    if day_filter is not None:
-        la_tz_filter = ZoneInfo("America/Los_Angeles")
-        deduped = [
-            item for item in deduped
-            if parse_iso8601_utc(item["start_at"]).astimezone(la_tz_filter).weekday() in day_filter
-        ]
-    if args.exclude:
-        exclude_keywords = [k.strip().lower() for k in args.exclude.split(",") if k.strip()]
-        deduped = [
-            item for item in deduped
-            if not any(kw in item["title"].lower() for kw in exclude_keywords)
-        ]
-    if args.search:
-        search_term = args.search.lower()
-        deduped = [item for item in deduped if search_term in item["title"].lower()]
-    if regex_pattern is not None:
-        deduped = [item for item in deduped if regex_pattern.search(item["title"])]
-    if args.glob is not None:
-        glob_pat = args.glob.lower()
-        deduped = [item for item in deduped if fnmatch.fnmatch(item["title"].lower(), glob_pat)]
-    if args.sort == "date":
-        la_tz = ZoneInfo("America/Los_Angeles")
-        deduped.sort(
-            key=lambda x: (
-                parse_iso8601_utc(x["start_at"]).astimezone(la_tz).date(),
-                -int(x["guest_count"]),
-                x["title"].lower(),
-            )
-        )
-    else:
-        deduped.sort(
-            key=lambda x: (
-                -int(x["guest_count"]),
-                parse_iso8601_utc(x["start_at"]),
-                x["title"].lower(),
-            )
-        )
-
     seen_urls = load_seen_urls()
-    if not args.show_all:
-        deduped = [item for item in deduped if item["url"] not in seen_urls]
 
+    params = QueryParams(
+        days=args.days,
+        from_date=args.from_date,
+        to_date=args.to_date,
+        min_guest=args.min_guest,
+        max_guest=args.max_guest,
+        min_time=args.min_time,
+        max_time=args.max_time,
+        day=args.day,
+        exclude=args.exclude,
+        search=args.search,
+        regex=args.regex,
+        glob=args.glob,
+        sort=args.sort,
+        show_all=args.show_all,
+    )
+    try:
+        result = query_events(all_events, params, seen_urls=seen_urls)
+    except QueryValidationError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+
+    has_date_args = args.from_date is not None or args.to_date is not None
     output = {
         "generated_at": now_utc.isoformat(),
         "window_days": args.days if args.days is not None else (14 if not has_date_args else None),
         "from_date": args.from_date,
         "to_date": args.to_date,
-        "window_start_utc": start_utc.isoformat(),
-        "window_end_utc": end_utc.isoformat(),
+        "window_start_utc": result.window_start_utc.isoformat(),
+        "window_end_utc": result.window_end_utc.isoformat(),
         "rank_by": "guest_count",
         "sort": args.sort,
         "min_guest": args.min_guest,
@@ -825,14 +705,14 @@ def cmd_query(args: argparse.Namespace) -> int:
         "dedupe_by": "url",
         "lat": HARDCODED_LAT,
         "lon": HARDCODED_LON,
-        "total_events_after_dedupe": len(deduped),
-        "events": deduped,
+        "total_events_after_dedupe": result.total_after_filter,
+        "events": result.events,
     }
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
             json.dump(output, f, indent=2)
 
-    top_n = deduped[: args.top]
+    top_n = result.events[: args.top]
     print(f"Top {len(top_n)} events (sorted by {args.sort}):")
     score_width = max((len(f"[{int(item['guest_count'])}]") for item in top_n), default=3)
     date_width = max((len(format_los_angeles_time(item["start_at"])) for item in top_n), default=0)
