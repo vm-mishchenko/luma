@@ -129,31 +129,18 @@ class TestFindLatestCache:
 # ---------------------------------------------------------------------------
 
 class TestCmdRefresh:
-    def test_success(self, tmp_path):
-        fake_events = [
-            {
-                "title": "E1",
-                "url": "https://luma.com/e1",
-                "start_at": datetime.now(timezone.utc).isoformat(),
-                "guest_count": 50,
-                "sources": ["test"],
-            }
-        ]
-        with mock.patch.object(cli, "fetch_all_events", return_value=fake_events):
+    def test_success(self, tmp_path, capsys):
+        cache_path = tmp_path / "events-2026-02-23_00-00-00.json"
+        with mock.patch.object(cli, "refresh", return_value=(1, cache_path)):
             rc = cli.cmd_refresh(retries=5)
         assert rc == 0
-        caches = list(tmp_path.glob("events-*.json"))
-        assert len(caches) == 1
-        data = json.loads(caches[0].read_text(encoding="utf-8"))
-        assert len(data["events"]) == 1
-        assert data["events"][0]["title"] == "E1"
+        assert f"Cached 1 events to {cache_path}" in capsys.readouterr().err
 
-    def test_network_error_returns_1(self, tmp_path):
-        with mock.patch.object(
-            cli, "fetch_all_events", side_effect=OSError("network down")
-        ):
+    def test_network_error_returns_1(self, tmp_path, capsys):
+        with mock.patch.object(cli, "refresh", side_effect=OSError("network down")):
             rc = cli.cmd_refresh(retries=5)
         assert rc == 1
+        assert "Error fetching events: network down" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------
