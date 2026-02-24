@@ -22,19 +22,17 @@ from __future__ import annotations
 
 import argparse
 import json
-import pathlib
 import sys
 import urllib.error
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+from luma import config
 from luma.config import (
-    CACHE_DIR,
     CACHE_STALE_HOURS,
     DEFAULT_WINDOW_DAYS,
     HARDCODED_LAT,
     HARDCODED_LON,
-    SEEN_FILE,
     TIMEZONE_NAME,
 )
 from luma.query import (
@@ -66,16 +64,17 @@ def format_los_angeles_time(value: str) -> str:
     return f"{weekday} {month} {day}, {time_part}"
 
 
-def find_latest_cache() -> pathlib.Path | None:
+def find_latest_cache():
     """Return the newest events-*.json cache file, or None if no cache exists."""
-    return _q_find_latest_cache(CACHE_DIR)
+    return _q_find_latest_cache(config.get_cache_dir())
 
 
 def load_seen_urls() -> set[str]:
-    if not SEEN_FILE.is_file():
+    seen_file = config.get_seen_file()
+    if not seen_file.is_file():
         return set()
     try:
-        with open(SEEN_FILE, "r", encoding="utf-8") as f:
+        with open(seen_file, "r", encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, list):
             return set(data)
@@ -85,15 +84,16 @@ def load_seen_urls() -> set[str]:
 
 
 def save_seen_urls(urls: set[str]) -> None:
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    with open(SEEN_FILE, "w", encoding="utf-8") as f:
+    cache_dir = config.get_cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    with open(config.get_seen_file(), "w", encoding="utf-8") as f:
         json.dump(sorted(urls), f, indent=2)
 
 
 def cmd_refresh(retries: int) -> int:
     """Fetch events from all sources and write to cache."""
     try:
-        count, path = refresh(retries=retries, cache_dir=CACHE_DIR)
+        count, path = refresh(retries=retries)
     except (urllib.error.URLError, urllib.error.HTTPError, OSError) as err:
         print(f"Error fetching events: {err}", file=sys.stderr)
         return 1
@@ -220,7 +220,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "  luma refresh   Fetch events from all sources and write to cache.\n"
             "  luma [options] Query cached events (default).\n"
             "\n"
-            f"Cache: {CACHE_DIR}/events-<timestamp>.json"
+            "Cache: <cache-dir>/events-<timestamp>.json"
         ),
         epilog=(
             "Examples:\n"
@@ -243,6 +243,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "    Fetch with more retries for flaky networks."
         ),
         formatter_class=argparse.RawTextHelpFormatter,
+    )
+    parser.add_argument(
+        "--cache-dir",
+        default=None,
+        help="Override the cache directory (default: ~/.cache/luma).",
     )
     subparsers = parser.add_subparsers(dest="command")
     refresh_parser = subparsers.add_parser(
@@ -269,8 +274,9 @@ def cmd_query(args: argparse.Namespace) -> int:
         return 2
 
     if args.reset:
-        if SEEN_FILE.is_file():
-            SEEN_FILE.unlink()
+        seen_file = config.get_seen_file()
+        if seen_file.is_file():
+            seen_file.unlink()
             print("Cleared seen events.", file=sys.stderr)
         else:
             print("No seen events to clear.", file=sys.stderr)
@@ -389,6 +395,7 @@ def cmd_query(args: argparse.Namespace) -> int:
 
 def main() -> int:
     args = parse_args()
+    config.configure(cache_dir=args.cache_dir)
     if args.command == "refresh":
         return cmd_refresh(args.retries)
     return cmd_query(args)

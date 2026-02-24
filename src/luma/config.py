@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import pathlib
 
-CACHE_DIR = pathlib.Path.home() / ".cache" / "luma"
+_DEFAULT_CACHE_DIR = pathlib.Path.home() / ".cache" / "luma"
+_cache_dir_override: pathlib.Path | None = None
+
 DEFAULT_WINDOW_DAYS = 14
 CACHE_STALE_HOURS = 12
 TIMEZONE_NAME = "America/Los_Angeles"
@@ -12,7 +14,6 @@ TIMEZONE_NAME = "America/Los_Angeles"
 EVENTS_FILENAME_PREFIX = "events-"
 EVENTS_CACHE_GLOB = f"{EVENTS_FILENAME_PREFIX}*.json"
 SEEN_FILENAME = "seen.json"
-SEEN_FILE = CACHE_DIR / SEEN_FILENAME
 
 API_BASE = "https://api2.luma.com"
 FETCH_WINDOW_DAYS = 14
@@ -33,3 +34,25 @@ HARDCODED_CALENDARS = [
     {"url": "https://luma.com/sfaiengineers", "calendar_api_id": "cal-EmYs2kgt1D9Gb27"},
 ]
 PAGINATION_LIMIT = "50"
+
+
+def configure(*, cache_dir: str | None = None) -> None:
+    global _cache_dir_override
+    if cache_dir is not None:
+        _cache_dir_override = pathlib.Path(cache_dir).expanduser()
+
+
+def get_cache_dir() -> pathlib.Path:
+    if _cache_dir_override is not None:
+        return _cache_dir_override
+    return _DEFAULT_CACHE_DIR
+
+
+def get_seen_file() -> pathlib.Path:
+    return get_cache_dir() / SEEN_FILENAME
+
+
+def _reset() -> None:
+    """Reset runtime overrides. For testing only."""
+    global _cache_dir_override
+    _cache_dir_override = None

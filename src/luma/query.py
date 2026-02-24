@@ -17,7 +17,7 @@ from typing import Any
 
 from zoneinfo import ZoneInfo
 
-from luma.config import CACHE_DIR, DEFAULT_WINDOW_DAYS, EVENTS_CACHE_GLOB, TIMEZONE_NAME
+from luma.config import DEFAULT_WINDOW_DAYS, EVENTS_CACHE_GLOB, TIMEZONE_NAME
 
 
 # ---------------------------------------------------------------------------
