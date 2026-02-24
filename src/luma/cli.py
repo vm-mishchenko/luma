@@ -39,7 +39,7 @@ from zoneinfo import ZoneInfo
 
 API_BASE = "https://api2.luma.com"
 CACHE_DIR = pathlib.Path.home() / ".cache" / "luma"
-CACHE_TTL_HOURS = 12
+CACHE_STALE_HOURS = 12
 FETCH_WINDOW_DAYS = 14
 REQUEST_DELAY_SEC = 0.3
 HARDCODED_CATEGORY_URLS = [
@@ -356,23 +356,14 @@ def _cache_filename(fetched_at: datetime) -> str:
     return f"events-{stamp}.json"
 
 
-def find_fresh_cache() -> pathlib.Path | None:
-    """Return the most recent cache file if it's within the TTL, else None."""
+def find_latest_cache() -> pathlib.Path | None:
+    """Return the newest events-*.json cache file, or None if no cache exists."""
     if not CACHE_DIR.is_dir():
         return None
     candidates = sorted(CACHE_DIR.glob("events-*.json"), reverse=True)
     if not candidates:
         return None
-    latest = candidates[0]
-    try:
-        with open(latest, "r", encoding="utf-8") as f:
-            meta = json.load(f)
-        fetched_at = parse_iso8601_utc(meta["fetched_at"])
-        if datetime.now(timezone.utc) - fetched_at < timedelta(hours=CACHE_TTL_HOURS):
-            return latest
-    except (KeyError, json.JSONDecodeError, OSError):
-        pass
-    return None
+    return candidates[0]
 
 
 def save_cache(events: list[dict[str, Any]], fetched_at: datetime) -> pathlib.Path:
@@ -475,111 +466,21 @@ def fetch_all_events(*, retries: int) -> list[dict[str, Any]]:
     return dedupe_by_url(all_records)
 
 
-def get_events(*, refresh: bool, retries: int) -> list[dict[str, Any]]:
-    """Return events from cache or fresh fetch."""
-    if not refresh:
-        cached = find_fresh_cache()
-        if cached:
-            print(f"Using cached events: {cached.name}", file=sys.stderr)
-            return load_cache(cached)
-
-    print("Fetching fresh events...", file=sys.stderr)
-    events = fetch_all_events(retries=retries)
+def cmd_refresh(retries: int) -> int:
+    """Fetch events from all sources and write to cache."""
+    try:
+        events = fetch_all_events(retries=retries)
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError) as err:
+        print(f"Error fetching events: {err}", file=sys.stderr)
+        return 1
     fetched_at = datetime.now(timezone.utc)
     path = save_cache(events, fetched_at)
     print(f"Cached {len(events)} events to {path}", file=sys.stderr)
-    return events
+    return 0
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Fetch, merge, dedupe, and rank Luma events from hardcoded sources:\n"
-            "  - Categories: ai, tech, sf\n"
-            "  - Calendars: genai-sf, frontiertower, sf-hardware-meetup, deepmind, genai-collective, sfaiengineers\n"
-            "Date window: --days (default 14) OR --from-date/--to-date (YYYYMMDD, mutually exclusive with --days).\n"
-            "Title filter: --search, --regex, or --glob (mutually exclusive).\n"
-            "\n"
-            f"Cache: {CACHE_DIR}/events-<timestamp>.json\n"
-            f"TTL: {CACHE_TTL_HOURS}h. Use --refresh to force refetch.\n"
-            "\n"
-            "Defaults:\n"
-            "  days        = 14\n"
-            "  top         = 30\n"
-            "  sort        = date\n"
-            "  min-time    = no limit\n"
-            "  max-time    = no limit"
-        ),
-        epilog=(
-            "Examples:\n"
-            "  luma\n"
-            "    Run with defaults (14 days, top 30, sort=date), print to stdout only.\n"
-            "\n"
-            "  luma --days 30 --top 100\n"
-            "    Show top 100 events in the next 30 days, sorted by popularity.\n"
-            "\n"
-            "  luma --sort guest --days 7 --top 50\n"
-            "    Show the top 50 events by popularity for the next 7 days.\n"
-            "\n"
-            "  luma --days 30 --top 100 --out results.json\n"
-            "    Save full ranked output JSON to results.json.\n"
-            "\n"
-            "  luma --retries 8\n"
-            "    Increase HTTP retry attempts for flaky/rate-limited network conditions.\n"
-            "\n"
-            "  luma --min-guest 100 --top 50\n"
-            "    Only include events with guest_count >= 100.\n"
-            "\n"
-            "  luma --max-guest 500\n"
-            "    Only include events with guest_count <= 500.\n"
-            "\n"
-            "  luma --min-time 18 --days 30\n"
-            "    Only include events that start at or after hour 18 (6PM) Los Angeles time.\n"
-            "\n"
-            "  luma --min-time 17 --max-time 20\n"
-            "    Only include events that start between 5PM and 8PM Los Angeles time.\n"
-            "\n"
-            "  luma --day Tue,Thu\n"
-            "    Only show events on Tuesday and Thursday.\n"
-            "\n"
-            "  luma --search 'AI'\n"
-            "    Only show events with 'AI' in the title.\n"
-            "\n"
-            "  luma --exclude 'Running,Yoga'\n"
-            "    Exclude events with 'Running' or 'Yoga' in the title.\n"
-            "\n"
-            "  luma --regex 'AI.*meetup'\n"
-            "    Only show events whose title matches the regex (case-insensitive).\n"
-            "\n"
-            "  luma --glob '*AI*meetup*'\n"
-            "    Only show events whose title matches the glob pattern (case-insensitive).\n"
-            "\n"
-            "  luma --from-date 20260301 --to-date 20260315\n"
-            "    Only show events between March 1 and March 15, 2026.\n"
-            "\n"
-            "  luma --from-date 20260301\n"
-            "    Only show events starting from March 1 (30-day window).\n"
-            "\n"
-            "  luma --to-date 20260315\n"
-            "    Only show events from today through March 15.\n"
-            "\n"
-            "  luma --refresh\n"
-            "    Force refetch events, ignoring cache.\n"
-            "\n"
-            "  luma --discard\n"
-            "    Show unseen events and mark them all as seen.\n"
-            "\n"
-            "  luma --all\n"
-            "    Show all events; previously discarded ones appear grayed out.\n"
-            "\n"
-            "  luma --reset\n"
-            "    Clear the seen events list, then run normally.\n"
-            "\n"
-            "  luma --from-date 20260301 --to-date 20260315 --top 100 --sort date --day Tue,Thu --min-guest 100 --max-guest 500 --min-time 18 --max-time 21 --search AI --exclude Running --refresh --retries 8 --out results.json\n"
-            "    Full example with all filters/options enabled."
-        ),
-        formatter_class=argparse.RawTextHelpFormatter,
-    )
+def _add_query_args(parser: argparse.ArgumentParser) -> None:
+    """Register query-related flags on *parser*."""
     parser.add_argument(
         "--days",
         type=int,
@@ -603,12 +504,6 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=100,
         help="How many events to print after sorting (default: 100).",
-    )
-    parser.add_argument(
-        "--retries",
-        type=int,
-        default=5,
-        help="Retry attempts for HTTP requests with exponential backoff (default: 5).",
     )
     parser.add_argument(
         "--out",
@@ -673,11 +568,6 @@ def parse_args() -> argparse.Namespace:
         help="Only show events whose title matches this glob pattern (case-insensitive, e.g. '*AI*meetup*'). Mutually exclusive with --search/--regex.",
     )
     parser.add_argument(
-        "--refresh",
-        action="store_true",
-        help="Force refetch events, ignoring cache.",
-    )
-    parser.add_argument(
         "--discard",
         action="store_true",
         help="Mark all displayed events as seen. Mutually exclusive with --all and --reset.",
@@ -693,11 +583,62 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Clear the seen events list. Mutually exclusive with --discard.",
     )
-    return parser.parse_args()
 
 
-def main() -> int:
-    args = parse_args()
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Query and browse Luma events from a local cache.\n"
+            "\n"
+            "Sources:\n"
+            "  Categories: ai, tech, sf\n"
+            "  Calendars: genai-sf, frontiertower, sf-hardware-meetup, deepmind, genai-collective, sfaiengineers\n"
+            "\n"
+            "Subcommands:\n"
+            "  luma refresh   Fetch events from all sources and write to cache.\n"
+            "  luma [options] Query cached events (default).\n"
+            "\n"
+            f"Cache: {CACHE_DIR}/events-<timestamp>.json"
+        ),
+        epilog=(
+            "Examples:\n"
+            "  luma refresh\n"
+            "    Fetch fresh events from all sources and save to cache.\n"
+            "\n"
+            "  luma\n"
+            "    Show cached events with defaults (14 days, top 100, sort=date).\n"
+            "\n"
+            "  luma --days 7 --top 50\n"
+            "    Show top 50 cached events in the next 7 days.\n"
+            "\n"
+            "  luma --sort guest --min-guest 100\n"
+            "    Show cached events sorted by popularity, minimum 100 guests.\n"
+            "\n"
+            "  luma --search 'AI' --day Tue,Thu\n"
+            "    Show cached events with 'AI' in the title on Tue/Thu.\n"
+            "\n"
+            "  luma refresh --retries 8\n"
+            "    Fetch with more retries for flaky networks."
+        ),
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    subparsers = parser.add_subparsers(dest="command")
+    refresh_parser = subparsers.add_parser(
+        "refresh",
+        help="Fetch events from all sources and write to cache.",
+    )
+    refresh_parser.add_argument(
+        "--retries",
+        type=int,
+        default=5,
+        help="Retry attempts for HTTP requests with exponential backoff (default: 5).",
+    )
+    _add_query_args(parser)
+    return parser.parse_args(argv)
+
+
+def cmd_query(args: argparse.Namespace) -> int:
+    """Query cached events with filters and display results."""
     min_time_obj: int | None = None
     if args.min_time is not None:
         if args.min_time < 0 or args.min_time > 23:
@@ -789,7 +730,27 @@ def main() -> int:
         start_utc = today_la.astimezone(timezone.utc)
         end_utc = start_utc + timedelta(days=days)
 
-    all_events = get_events(refresh=args.refresh, retries=args.retries)
+    cache_path = find_latest_cache()
+    if cache_path is None:
+        print("No cached events. Run 'luma refresh' first.", file=sys.stderr)
+        return 1
+
+    try:
+        with open(cache_path, "r", encoding="utf-8") as f:
+            cache_meta = json.load(f)
+        fetched_at = parse_iso8601_utc(cache_meta["fetched_at"])
+        cache_age = now_utc - fetched_at
+        if cache_age > timedelta(hours=CACHE_STALE_HOURS):
+            age_days = cache_age.days
+            if age_days >= 1:
+                print(f"Warning: cache is {age_days} day{'s' if age_days != 1 else ''} old. Run 'luma refresh' to update.", file=sys.stderr)
+            else:
+                age_hours = int(cache_age.total_seconds() // 3600)
+                print(f"Warning: cache is {age_hours} hours old. Run 'luma refresh' to update.", file=sys.stderr)
+    except (KeyError, json.JSONDecodeError, OSError):
+        pass
+
+    all_events = load_cache(cache_path)
 
     deduped = [
         item for item in all_events
@@ -878,8 +839,8 @@ def main() -> int:
     la_tz = ZoneInfo("America/Los_Angeles")
     bold = "\033[1m"
     dim = "\033[2m"
-    reset = "\033[0m"
-    highlight_days = {1, 3}  # Tuesday, Thursday (Monday=0)
+    reset_ansi = "\033[0m"
+    highlight_days = {1, 3}
     prev_iso_week: tuple[int, int] | None = None
     for item in top_n:
         dt_la = parse_iso8601_utc(item["start_at"]).astimezone(la_tz)
@@ -896,9 +857,9 @@ def main() -> int:
         date_text = start.ljust(date_width)
         line = f"{score_text} {date_text} | {item['title']} | {item['url']}"
         if args.show_all and item["url"] in seen_urls:
-            line = f"{dim}{line}{reset}"
+            line = f"{dim}{line}{reset_ansi}"
         elif dt_la.weekday() in highlight_days:
-            line = f"{bold}{line}{reset}"
+            line = f"{bold}{line}{reset_ansi}"
         print(line)
 
     if args.discard:
@@ -909,6 +870,13 @@ def main() -> int:
     if args.out:
         print(f"\nSaved full output: {args.out}")
     return 0
+
+
+def main() -> int:
+    args = parse_args()
+    if args.command == "refresh":
+        return cmd_refresh(args.retries)
+    return cmd_query(args)
 
 
 if __name__ == "__main__":
