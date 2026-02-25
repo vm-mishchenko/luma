@@ -27,16 +27,16 @@ import urllib.error
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from luma import config
-from luma.chat import cmd_chat
-from luma.config import (
+import config
+from chat import cmd_chat
+from config import (
     CACHE_STALE_HOURS,
     DEFAULT_WINDOW_DAYS,
     HARDCODED_LAT,
     HARDCODED_LON,
     TIMEZONE_NAME,
 )
-from luma.query import (
+from query import (
     QueryParams,
     QueryValidationError,
     find_latest_cache as _q_find_latest_cache,
@@ -44,7 +44,7 @@ from luma.query import (
     parse_iso8601_utc,
     query_events,
 )
-from luma.refresh import refresh
+from refresh import refresh
 
 
 def format_los_angeles_time(value: str) -> str:

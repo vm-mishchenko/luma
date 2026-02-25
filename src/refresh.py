@@ -1,7 +1,7 @@
 """Refresh orchestration for Luma events.
 
 This module coordinates downloading and caching. Network I/O is delegated
-to ``luma.download.download_events``; cache paths come from ``luma.config``.
+to ``download.download_events``; cache paths come from ``config``.
 """
 
 from __future__ import annotations
@@ -12,9 +12,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from luma import config
-from luma.config import EVENTS_FILENAME_PREFIX, FETCH_WINDOW_DAYS, TIMEZONE_NAME
-from luma.download import download_events
+import config
+from config import EVENTS_FILENAME_PREFIX, FETCH_WINDOW_DAYS, TIMEZONE_NAME
+from download import download_events
 
 
 def _window(now_utc: datetime) -> tuple[datetime, datetime]:

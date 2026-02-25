@@ -7,7 +7,7 @@ import sys
 import threading
 import time
 
-from luma.agent import Agent
+from agent import Agent
 
 
 class _Spinner:

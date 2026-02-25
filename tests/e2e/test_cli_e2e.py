@@ -3,7 +3,7 @@
 Each test exercises the full CLI path: argv -> parse_args -> config.configure
 -> command dispatch -> filesystem side-effects / stdout / stderr.
 
-The *only* mock seam is ``luma.download.download_events``; everything else
+The *only* mock seam is ``download.download_events``; everything else
 (config, refresh orchestration, query, cache I/O) runs for real.
 
 Skipped white-box assertions (not externally observable via CLI):
@@ -20,7 +20,8 @@ from unittest import mock
 
 import pytest
 
-from luma import cli, config
+import cli
+import config
 
 
 # ---------------------------------------------------------------------------
@@ -97,7 +98,7 @@ def test_query_no_cache_exits_1(tmp_path, capsys):
 
 
 def test_refresh_success(tmp_path, capsys):
-    with mock.patch("luma.refresh.download_events", return_value=SAMPLE_EVENTS):
+    with mock.patch("refresh.download_events", return_value=SAMPLE_EVENTS):
         rc = _run_cli(["--cache-dir", str(tmp_path), "refresh"])
     assert rc == 0
     err = capsys.readouterr().err
@@ -108,7 +109,7 @@ def test_refresh_success(tmp_path, capsys):
 
 
 def test_refresh_network_error(tmp_path, capsys):
-    with mock.patch("luma.refresh.download_events", side_effect=OSError("net down")):
+    with mock.patch("refresh.download_events", side_effect=OSError("net down")):
         rc = _run_cli(["--cache-dir", str(tmp_path), "refresh"])
     assert rc == 1
     assert "net down" in capsys.readouterr().err
@@ -131,7 +132,7 @@ def test_stale_cache_warns(tmp_path, capsys):
 
 
 def test_refresh_retries_forwarded(tmp_path):
-    with mock.patch("luma.refresh.download_events", return_value=[]) as m:
+    with mock.patch("refresh.download_events", return_value=[]) as m:
         _run_cli(["--cache-dir", str(tmp_path), "refresh", "--retries", "3"])
     assert m.call_args.kwargs["retries"] == 3
 

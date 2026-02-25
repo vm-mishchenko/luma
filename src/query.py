@@ -2,7 +2,7 @@
 
 This module is the data-access and query layer between storage (cache files)
 and consumers (CLI, future agent module).  It has no dependency on argparse,
-produces no terminal output, and never imports from ``luma.cli``.
+produces no terminal output, and never imports from ``cli``.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from typing import Any
 
 from zoneinfo import ZoneInfo
 
-from luma.config import DEFAULT_WINDOW_DAYS, EVENTS_CACHE_GLOB, TIMEZONE_NAME
+from config import DEFAULT_WINDOW_DAYS, EVENTS_CACHE_GLOB, TIMEZONE_NAME
 
 
 # ---------------------------------------------------------------------------

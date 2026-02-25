@@ -1,3 +1,7 @@
 .idea
 .augment
 .cursor
+.venv
+*.egg-info
+build/
+dist/

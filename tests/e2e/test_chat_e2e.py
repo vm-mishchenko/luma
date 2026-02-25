@@ -23,7 +23,7 @@ def _spawn_chat(timeout: int = 8) -> pexpect.spawn:
     )
     child = pexpect.spawn(
         sys.executable,
-        ["-m", "luma", "chat"],
+        ["-m", "cli", "chat"],
         cwd=str(REPO_ROOT),
         env=env,
         encoding="utf-8",

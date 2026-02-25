@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from luma.config import (
+from config import (
     API_BASE,
     HARDCODED_CALENDARS,
     HARDCODED_CATEGORY_URLS,
