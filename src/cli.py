@@ -24,23 +24,23 @@ import argparse
 import json
 import sys
 import urllib.error
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 import config
 from chat import cmd_chat
 from config import (
-    CACHE_STALE_HOURS,
     DEFAULT_WINDOW_DAYS,
     HARDCODED_LAT,
     HARDCODED_LON,
     TIMEZONE_NAME,
 )
 from query import (
+    CacheError,
+    CacheInfo,
     QueryParams,
     QueryValidationError,
-    find_latest_cache as _q_find_latest_cache,
-    load_cache,
+    check_cache_staleness,
     parse_iso8601_utc,
     query_events,
 )
@@ -63,11 +63,6 @@ def format_los_angeles_time(value: str) -> str:
     else:
         weekday = dt_la.strftime("%a")
     return f"{weekday} {month} {day}, {time_part}"
-
-
-def find_latest_cache():
-    """Return the newest events-*.json cache file, or None if no cache exists."""
-    return _q_find_latest_cache(config.get_cache_dir())
 
 
 def load_seen_urls() -> set[str]:
@@ -287,28 +282,17 @@ def cmd_query(args: argparse.Namespace) -> int:
         else:
             print("No seen events to clear.", file=sys.stderr)
 
-    cache_path = find_latest_cache()
-    if cache_path is None:
-        print("No cached events. Run 'luma refresh' first.", file=sys.stderr)
-        return 1
+    staleness = check_cache_staleness()
+    if staleness is not None and staleness.is_stale:
+        age_days = staleness.age.days
+        if age_days >= 1:
+            print(f"Warning: cache is {age_days} day{'s' if age_days != 1 else ''} old. "
+                  "Run 'luma refresh' to update.", file=sys.stderr)
+        else:
+            age_hours = int(staleness.age.total_seconds() // 3600)
+            print(f"Warning: cache is {age_hours} hours old. "
+                  "Run 'luma refresh' to update.", file=sys.stderr)
 
-    now_utc = datetime.now(timezone.utc)
-    try:
-        with open(cache_path, "r", encoding="utf-8") as f:
-            cache_meta = json.load(f)
-        fetched_at = parse_iso8601_utc(cache_meta["fetched_at"])
-        cache_age = now_utc - fetched_at
-        if cache_age > timedelta(hours=CACHE_STALE_HOURS):
-            age_days = cache_age.days
-            if age_days >= 1:
-                print(f"Warning: cache is {age_days} day{'s' if age_days != 1 else ''} old. Run 'luma refresh' to update.", file=sys.stderr)
-            else:
-                age_hours = int(cache_age.total_seconds() // 3600)
-                print(f"Warning: cache is {age_hours} hours old. Run 'luma refresh' to update.", file=sys.stderr)
-    except (KeyError, json.JSONDecodeError, OSError):
-        pass
-
-    all_events = load_cache(cache_path)
     seen_urls = load_seen_urls()
 
     params = QueryParams(
@@ -328,11 +312,15 @@ def cmd_query(args: argparse.Namespace) -> int:
         show_all=args.show_all,
     )
     try:
-        result = query_events(all_events, params, seen_urls=seen_urls)
+        result = query_events(params, seen_urls=seen_urls)
+    except CacheError as e:
+        print(str(e), file=sys.stderr)
+        return 1
     except QueryValidationError as e:
         print(str(e), file=sys.stderr)
         return 2
 
+    now_utc = datetime.now(timezone.utc)
     has_date_args = args.from_date is not None or args.to_date is not None
     output = {
         "generated_at": now_utc.isoformat(),

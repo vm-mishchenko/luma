@@ -17,7 +17,8 @@ from typing import Any
 
 from zoneinfo import ZoneInfo
 
-from config import DEFAULT_WINDOW_DAYS, EVENTS_CACHE_GLOB, TIMEZONE_NAME
+import config
+from config import CACHE_STALE_HOURS, DEFAULT_WINDOW_DAYS, EVENTS_CACHE_GLOB, TIMEZONE_NAME
 
 
 # ---------------------------------------------------------------------------
@@ -26,6 +27,10 @@ from config import DEFAULT_WINDOW_DAYS, EVENTS_CACHE_GLOB, TIMEZONE_NAME
 
 class QueryValidationError(ValueError):
     """Raised when query parameters are invalid."""
+
+
+class CacheError(Exception):
+    """Raised when the event cache is missing or corrupt."""
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +53,12 @@ class QueryParams:
     glob: str | None = None
     sort: str = "date"
     show_all: bool = False
+
+
+@dataclass
+class CacheInfo:
+    is_stale: bool
+    age: timedelta
 
 
 @dataclass
@@ -75,8 +86,9 @@ def is_on_or_after_min_time(start_at: str, min_hour: int) -> bool:
 # Cache access
 # ---------------------------------------------------------------------------
 
-def find_latest_cache(cache_dir: pathlib.Path) -> pathlib.Path | None:
+def _find_latest_cache() -> pathlib.Path | None:
     """Return the newest events-*.json cache file, or None if no cache exists."""
+    cache_dir = config.get_cache_dir()
     if not cache_dir.is_dir():
         return None
     candidates = sorted(cache_dir.glob(EVENTS_CACHE_GLOB), reverse=True)
@@ -85,10 +97,28 @@ def find_latest_cache(cache_dir: pathlib.Path) -> pathlib.Path | None:
     return candidates[0]
 
 
-def load_cache(path: pathlib.Path) -> list[dict[str, Any]]:
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return data["events"]
+def _load_cache(path: pathlib.Path) -> list[dict[str, Any]]:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data["events"]
+    except (json.JSONDecodeError, KeyError, OSError) as err:
+        raise CacheError(f"Cannot read cache file {path}: {err}") from err
+
+
+def check_cache_staleness() -> CacheInfo | None:
+    """Return staleness info for the latest cache, or None if unavailable."""
+    path = _find_latest_cache()
+    if path is None:
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        fetched_at = parse_iso8601_utc(data["fetched_at"])
+    except (json.JSONDecodeError, KeyError, OSError, ValueError):
+        return None
+    age = datetime.now(timezone.utc) - fetched_at
+    return CacheInfo(is_stale=age > timedelta(hours=CACHE_STALE_HOURS), age=age)
 
 
 # ---------------------------------------------------------------------------
@@ -96,12 +126,15 @@ def load_cache(path: pathlib.Path) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 def query_events(
-    events: list[dict[str, Any]],
     params: QueryParams,
     *,
     seen_urls: set[str] | None = None,
 ) -> QueryResult:
-    """Filter, sort, and return events.  Pure logic — no I/O."""
+    """Load events from cache, then filter, sort, and return them."""
+    path = _find_latest_cache()
+    if path is None:
+        raise CacheError("No cached events. Run 'luma refresh' first.")
+    events = _load_cache(path)
 
     # -- validation ----------------------------------------------------------
 
