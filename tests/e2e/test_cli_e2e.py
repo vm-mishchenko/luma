@@ -221,14 +221,42 @@ def test_free_text_event_list_result(tmp_path, capsys):
     assert "Agent Event B" in out
 
 
-def test_free_text_out_text_result(tmp_path, capsys):
-    out_file = tmp_path / "out.json"
-    rc = _run_cli(["--cache-dir", str(tmp_path), "--out", str(out_file), "hello"])
+def test_free_text_agent_exception(tmp_path, capsys):
+    with mock.patch("luma.agent.agent.Agent.query", side_effect=RuntimeError("boom")):
+        rc = _run_cli(["--cache-dir", str(tmp_path), "hello"])
+    assert rc == 1
+    assert "boom" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# --json output tests
+# ---------------------------------------------------------------------------
+
+
+def test_json_query(tmp_path, capsys):
+    _write_cache(tmp_path)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--json", "--min-guest", "0"])
     assert rc == 0
-    assert not out_file.exists()
+    data = json.loads(capsys.readouterr().out)
+    assert data["type"] == "query"
+    assert len(data["events"]) > 0
+    for event in data["events"]:
+        assert "title" in event
+        assert "url" in event
+        assert "start_at" in event
+        assert "guest_count" in event
 
 
-def test_free_text_out_event_list(tmp_path, capsys):
+def test_json_agent_text(tmp_path, capsys):
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--json", "hello"])
+    assert rc == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["type"] == "text"
+    from luma.agent import Agent
+    assert data["text"] == Agent.RESPONSE
+
+
+def test_json_agent_events(tmp_path, capsys):
     from luma.agent.agent import EventListResult
 
     sample = [
@@ -239,18 +267,48 @@ def test_free_text_out_event_list(tmp_path, capsys):
             "guest_count": 200,
         },
     ]
-    out_file = tmp_path / "out.json"
     with mock.patch("luma.agent.agent.Agent.query", return_value=EventListResult(events=sample)):
-        rc = _run_cli(["--cache-dir", str(tmp_path), "--out", str(out_file), "find events"])
+        rc = _run_cli(["--cache-dir", str(tmp_path), "--json", "find events"])
     assert rc == 0
-    assert out_file.is_file()
-    data = json.loads(out_file.read_text(encoding="utf-8"))
-    assert "events" in data
+    data = json.loads(capsys.readouterr().out)
+    assert data["type"] == "events"
+    assert data["total"] == 1
     assert data["events"][0]["title"] == "Agent Event A"
 
 
-def test_free_text_agent_exception(tmp_path, capsys):
-    with mock.patch("luma.agent.agent.Agent.query", side_effect=RuntimeError("boom")):
-        rc = _run_cli(["--cache-dir", str(tmp_path), "hello"])
+def test_json_on_refresh_rejected(tmp_path, capsys):
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--json", "refresh"])
+    assert rc == 2
+    assert "--json is not supported" in capsys.readouterr().err
+
+
+def test_json_on_chat_rejected(tmp_path, capsys):
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--json", "chat"])
+    assert rc == 2
+    assert "--json is not supported" in capsys.readouterr().err
+
+
+def test_json_ignores_top(tmp_path, capsys):
+    _write_cache(tmp_path)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--json", "--top", "1", "--min-guest", "0"])
+    assert rc == 0
+    data = json.loads(capsys.readouterr().out)
+    assert len(data["events"]) == 3
+
+
+def test_json_discard(tmp_path, capsys):
+    _write_cache(tmp_path)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--json", "--discard", "--min-guest", "0"])
+    assert rc == 0
+    seen_path = tmp_path / "seen.json"
+    assert seen_path.is_file()
+    seen = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert set(seen) == {e["url"] for e in SAMPLE_EVENTS if e["guest_count"] >= 0}
+
+
+def test_json_no_cache_empty_stdout(tmp_path, capsys):
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--json"])
     assert rc == 1
-    assert "boom" in capsys.readouterr().err
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "No cached events" in captured.err

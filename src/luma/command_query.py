@@ -188,9 +188,13 @@ def _query(args: argparse.Namespace) -> int:
         "total_events_after_dedupe": result.total_after_filter,
         "events": result.events,
     }
-    if args.out:
-        with open(args.out, "w", encoding="utf-8") as f:
-            json.dump(output, f, indent=2)
+    if args.json_output:
+        output["type"] = "query"
+        print(json.dumps(output, indent=2))
+        if args.discard:
+            new_seen = seen_urls | {item["url"] for item in result.events}
+            _save_seen_urls(new_seen)
+        return 0
 
     top_n = result.events[: args.top]
     _print_events(top_n, sort=args.sort, show_all=args.show_all, seen_urls=seen_urls)
@@ -200,8 +204,6 @@ def _query(args: argparse.Namespace) -> int:
         _save_seen_urls(new_seen)
         print(f"Marked {len(top_n)} events as seen.", file=sys.stderr)
 
-    if args.out:
-        print(f"\nSaved full output: {args.out}")
     return 0
 
 
@@ -216,6 +218,17 @@ def _agent_query(args: argparse.Namespace) -> int:
         print(f"Agent error: {exc}", file=sys.stderr)
         return 1
 
+    if args.json_output:
+        if isinstance(result, TextResult):
+            print(json.dumps({"type": "text", "text": result.text}, indent=2))
+        elif isinstance(result, EventListResult):
+            print(json.dumps({
+                "type": "events",
+                "events": result.events,
+                "total": len(result.events),
+            }, indent=2))
+        return 0
+
     if isinstance(result, TextResult):
         if result.text:
             print(result.text)
@@ -223,9 +236,6 @@ def _agent_query(args: argparse.Namespace) -> int:
 
     if isinstance(result, EventListResult):
         _print_events(result.events[: args.top], sort=args.sort)
-        if args.out:
-            with open(args.out, "w", encoding="utf-8") as f:
-                json.dump({"events": result.events}, f, indent=2)
         return 0
 
     return 0

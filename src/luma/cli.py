@@ -43,11 +43,6 @@ def _add_query_args(parser: argparse.ArgumentParser) -> None:
         help="How many events to print after sorting (default: 100).",
     )
     parser.add_argument(
-        "--out",
-        default=None,
-        help="Optional output JSON path. If omitted, no file is written.",
-    )
-    parser.add_argument(
         "--sort",
         choices=["date", "guest"],
         default="date",
@@ -217,6 +212,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Override the cache directory (default: ~/.cache/luma).",
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Output structured JSON to stdout instead of human-readable text.",
+    )
     subparsers = parser.add_subparsers(dest="command")
     refresh_parser = subparsers.add_parser(
         "refresh",
@@ -239,6 +240,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     config.configure(cache_dir=args.cache_dir)
+    if args.json_output and args.command in ("refresh", "chat"):
+        print(f"--json is not supported with '{args.command}'.", file=sys.stderr)
+        return 2
     if args.command == "refresh":
         return command_refresh.run(args.retries)
     if args.command == "chat":
