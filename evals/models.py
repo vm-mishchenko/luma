@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from luma.query import QueryParams
+from luma.event_store import QueryParams
 
 
 @dataclass

@@ -5,17 +5,15 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import sys
-import tempfile
 from pathlib import Path
 
-import luma.config as config
 from luma.agent import Agent, AgentResult
+from luma.event_store import EventStore, MemoryProvider
 
-from .helpers import write_cache
 from .models import QueryInput
 
 EVALS_DIR = Path(__file__).parent
-_INTERNAL_MODULES = {"__init__", "runner", "models", "evaluators", "helpers"}
+_INTERNAL_MODULES = {"__init__", "runner", "models", "evaluators"}
 
 
 def _list_eval_sets() -> list[str]:
@@ -50,15 +48,9 @@ def _load_dataset(name: str):
 
 def _make_task():
     def task(inp: QueryInput) -> AgentResult:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            write_cache(tmp_path, events=inp.events)
-            config.configure(cache_dir=str(tmp_path))
-            try:
-                agent = Agent()
-                return agent.query(inp.prompt, inp.params)
-            finally:
-                config._reset()
+        store = EventStore(MemoryProvider(events=inp.events))
+        agent = Agent(store=store)
+        return agent.query(inp.prompt, inp.params)
 
     return task
 

@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
-from luma.query import QueryParams
+from luma.event_store import EventStore, QueryParams
 
 
 @dataclass
@@ -26,6 +26,9 @@ class Agent:
     """Fake agent used to validate streaming contract."""
 
     RESPONSE = "I'm Luma assistant. I can help you find events."
+
+    def __init__(self, store: EventStore) -> None:
+        self._store = store
 
     def run(self, messages: list[dict[str, str]]) -> Iterator[str]:
         _ = messages

@@ -1,8 +1,8 @@
-"""Reusable query library for filtering, sorting, and retrieving Luma events.
+"""EventStore — unified abstraction for reading and writing Luma events.
 
-This module is the data-access and query layer between storage (cache files)
-and consumers (CLI, future agent module).  It has no dependency on argparse,
-produces no terminal output, and never imports from ``cli``.
+Providers handle storage mechanics (disk or memory).  Callers construct a
+provider, pass it to ``EventStore``, and interact only with the store after
+that.
 """
 
 from __future__ import annotations
@@ -13,12 +13,17 @@ import pathlib
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Protocol
 
 from zoneinfo import ZoneInfo
 
-import luma.config as config
-from luma.config import CACHE_STALE_HOURS, DEFAULT_WINDOW_DAYS, EVENTS_CACHE_GLOB, TIMEZONE_NAME
+from luma.config import (
+    CACHE_STALE_HOURS,
+    DEFAULT_WINDOW_DAYS,
+    EVENTS_CACHE_GLOB,
+    EVENTS_FILENAME_PREFIX,
+    TIMEZONE_NAME,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -83,58 +88,123 @@ def is_on_or_after_min_time(start_at: str, min_hour: int) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Cache access
+# Provider protocol & implementations
 # ---------------------------------------------------------------------------
 
-def _find_latest_cache() -> pathlib.Path | None:
-    """Return the newest events-*.json cache file, or None if no cache exists."""
-    cache_dir = config.get_cache_dir()
-    if not cache_dir.is_dir():
-        return None
-    candidates = sorted(cache_dir.glob(EVENTS_CACHE_GLOB), reverse=True)
-    if not candidates:
-        return None
-    return candidates[0]
+class EventProvider(Protocol):
+    def load(self) -> list[dict[str, Any]]: ...
+    def save(self, events: list[dict[str, Any]], fetched_at: datetime) -> None: ...
+    def check_staleness(self) -> CacheInfo: ...
 
 
-def _load_cache(path: pathlib.Path) -> list[dict[str, Any]]:
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data["events"]
-    except (json.JSONDecodeError, KeyError, OSError) as err:
-        raise CacheError(f"Cannot read cache file {path}: {err}") from err
+class DiskProvider:
+    """Reads and writes events as JSON cache files on disk."""
+
+    def __init__(self, cache_dir: pathlib.Path) -> None:
+        self._cache_dir = cache_dir
+
+    def load(self) -> list[dict[str, Any]]:
+        path = self._find_latest_cache()
+        if path is None:
+            raise CacheError("No cached events. Run 'luma refresh' first.")
+        return self._load_cache(path)
+
+    def save(self, events: list[dict[str, Any]], fetched_at: datetime) -> None:
+        self._cache_dir.mkdir(parents=True, exist_ok=True)
+        stamp = fetched_at.strftime("%Y-%m-%d_%H-%M-%S")
+        filename = f"{EVENTS_FILENAME_PREFIX}{stamp}.json"
+        payload = {"fetched_at": fetched_at.isoformat(), "events": events}
+        path = self._cache_dir / filename
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+
+    def check_staleness(self) -> CacheInfo:
+        path = self._find_latest_cache()
+        if path is None:
+            return CacheInfo(is_stale=False, age=timedelta(0))
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            fetched_at = parse_iso8601_utc(data["fetched_at"])
+        except (json.JSONDecodeError, KeyError, OSError, ValueError):
+            return CacheInfo(is_stale=False, age=timedelta(0))
+        age = datetime.now(timezone.utc) - fetched_at
+        return CacheInfo(is_stale=age > timedelta(hours=CACHE_STALE_HOURS), age=age)
+
+    def _find_latest_cache(self) -> pathlib.Path | None:
+        if not self._cache_dir.is_dir():
+            return None
+        candidates = sorted(self._cache_dir.glob(EVENTS_CACHE_GLOB), reverse=True)
+        if not candidates:
+            return None
+        return candidates[0]
+
+    def _load_cache(self, path: pathlib.Path) -> list[dict[str, Any]]:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data["events"]
+        except (json.JSONDecodeError, KeyError, OSError) as err:
+            raise CacheError(f"Cannot read cache file {path}: {err}") from err
 
 
-def check_cache_staleness() -> CacheInfo | None:
-    """Return staleness info for the latest cache, or None if unavailable."""
-    path = _find_latest_cache()
-    if path is None:
-        return None
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        fetched_at = parse_iso8601_utc(data["fetched_at"])
-    except (json.JSONDecodeError, KeyError, OSError, ValueError):
-        return None
-    age = datetime.now(timezone.utc) - fetched_at
-    return CacheInfo(is_stale=age > timedelta(hours=CACHE_STALE_HOURS), age=age)
+class MemoryProvider:
+    """Holds events in memory.  Used by the eval runner."""
+
+    def __init__(self, events: list[dict[str, Any]]) -> None:
+        self._events = events
+
+    def load(self) -> list[dict[str, Any]]:
+        return self._events
+
+    def save(self, events: list[dict[str, Any]], fetched_at: datetime) -> None:
+        self._events = events
+
+    def check_staleness(self) -> CacheInfo:
+        return CacheInfo(is_stale=False, age=timedelta(0))
 
 
 # ---------------------------------------------------------------------------
-# Query engine
+# EventStore
 # ---------------------------------------------------------------------------
 
-def query_events(
+class EventStore:
+    """Database-like abstraction over event storage.
+
+    Provider binding is fixed after construction.  Callers interact only with
+    ``query()``, ``save()``, and ``check_staleness()``.
+    """
+
+    def __init__(self, provider: EventProvider) -> None:
+        self._provider = provider
+
+    def query(
+        self,
+        params: QueryParams,
+        *,
+        seen_urls: set[str] | None = None,
+    ) -> QueryResult:
+        events = self._provider.load()
+        return _filter_and_sort_events(events, params, seen_urls=seen_urls)
+
+    def save(self, events: list[dict[str, Any]], fetched_at: datetime) -> None:
+        self._provider.save(events, fetched_at)
+
+    def check_staleness(self) -> CacheInfo:
+        return self._provider.check_staleness()
+
+
+# ---------------------------------------------------------------------------
+# Filter / sort engine (private)
+# ---------------------------------------------------------------------------
+
+def _filter_and_sort_events(
+    events: list[dict[str, Any]],
     params: QueryParams,
     *,
     seen_urls: set[str] | None = None,
 ) -> QueryResult:
-    """Load events from cache, then filter, sort, and return them."""
-    path = _find_latest_cache()
-    if path is None:
-        raise CacheError("No cached events. Run 'luma refresh' first.")
-    events = _load_cache(path)
+    """Filter, sort, and return events.  Pure function — no I/O."""
 
     # -- validation ----------------------------------------------------------
 

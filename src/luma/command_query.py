@@ -4,25 +4,24 @@ from __future__ import annotations
 
 import argparse
 import json
+import pathlib
 import sys
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-import luma.config as config
 from luma.config import (
     DEFAULT_WINDOW_DAYS,
     HARDCODED_LAT,
     HARDCODED_LON,
+    SEEN_FILENAME,
     TIMEZONE_NAME,
 )
-from luma.query import (
+from luma.event_store import (
     CacheError,
-    CacheInfo,
+    EventStore,
     QueryParams,
     QueryValidationError,
-    check_cache_staleness,
     parse_iso8601_utc,
-    query_events,
 )
 
 
@@ -44,8 +43,8 @@ def _format_los_angeles_time(value: str) -> str:
     return f"{weekday} {month} {day}, {time_part}"
 
 
-def _load_seen_urls() -> set[str]:
-    seen_file = config.get_seen_file()
+def _load_seen_urls(cache_dir: pathlib.Path) -> set[str]:
+    seen_file = cache_dir / SEEN_FILENAME
     if not seen_file.is_file():
         return set()
     try:
@@ -58,10 +57,10 @@ def _load_seen_urls() -> set[str]:
     return set()
 
 
-def _save_seen_urls(urls: set[str]) -> None:
-    cache_dir = config.get_cache_dir()
+def _save_seen_urls(urls: set[str], cache_dir: pathlib.Path) -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
-    with open(config.get_seen_file(), "w", encoding="utf-8") as f:
+    seen_file = cache_dir / SEEN_FILENAME
+    with open(seen_file, "w", encoding="utf-8") as f:
         json.dump(sorted(urls), f, indent=2)
 
 
@@ -126,7 +125,11 @@ def _print_events(
         print(line)
 
 
-def _query(args: argparse.Namespace) -> int:
+def _query(
+    args: argparse.Namespace,
+    store: EventStore,
+    cache_dir: pathlib.Path,
+) -> int:
     if args.discard and args.show_all:
         print("--discard and --all are mutually exclusive.", file=sys.stderr)
         return 2
@@ -135,15 +138,15 @@ def _query(args: argparse.Namespace) -> int:
         return 2
 
     if args.reset:
-        seen_file = config.get_seen_file()
+        seen_file = cache_dir / SEEN_FILENAME
         if seen_file.is_file():
             seen_file.unlink()
             print("Cleared seen events.", file=sys.stderr)
         else:
             print("No seen events to clear.", file=sys.stderr)
 
-    staleness = check_cache_staleness()
-    if staleness is not None and staleness.is_stale:
+    staleness = store.check_staleness()
+    if staleness.is_stale:
         age_days = staleness.age.days
         if age_days >= 1:
             print(f"Warning: cache is {age_days} day{'s' if age_days != 1 else ''} old. "
@@ -153,11 +156,11 @@ def _query(args: argparse.Namespace) -> int:
             print(f"Warning: cache is {age_hours} hours old. "
                   "Run 'luma refresh' to update.", file=sys.stderr)
 
-    seen_urls = _load_seen_urls()
+    seen_urls = _load_seen_urls(cache_dir)
 
     params = _build_query_params(args)
     try:
-        result = query_events(params, seen_urls=seen_urls)
+        result = store.query(params, seen_urls=seen_urls)
     except CacheError as e:
         print(str(e), file=sys.stderr)
         return 1
@@ -193,7 +196,7 @@ def _query(args: argparse.Namespace) -> int:
         print(json.dumps(output, indent=2))
         if args.discard:
             new_seen = seen_urls | {item["url"] for item in result.events}
-            _save_seen_urls(new_seen)
+            _save_seen_urls(new_seen, cache_dir)
         return 0
 
     top_n = result.events[: args.top]
@@ -201,18 +204,18 @@ def _query(args: argparse.Namespace) -> int:
 
     if args.discard:
         new_seen = seen_urls | {item["url"] for item in top_n}
-        _save_seen_urls(new_seen)
+        _save_seen_urls(new_seen, cache_dir)
         print(f"Marked {len(top_n)} events as seen.", file=sys.stderr)
 
     return 0
 
 
-def _agent_query(args: argparse.Namespace) -> int:
+def _agent_query(args: argparse.Namespace, store: EventStore) -> int:
     from luma.agent import Agent, EventListResult, TextResult
 
     params = _build_query_params(args)
     try:
-        agent = Agent()
+        agent = Agent(store=store)
         result = agent.query(args.query_text, params)
     except Exception as exc:
         print(f"Agent error: {exc}", file=sys.stderr)
@@ -241,7 +244,11 @@ def _agent_query(args: argparse.Namespace) -> int:
     return 0
 
 
-def run(args: argparse.Namespace) -> int:
+def run(
+    args: argparse.Namespace,
+    store: EventStore,
+    cache_dir: pathlib.Path,
+) -> int:
     if args.query_text:
-        return _agent_query(args)
-    return _query(args)
+        return _agent_query(args, store)
+    return _query(args, store, cache_dir)

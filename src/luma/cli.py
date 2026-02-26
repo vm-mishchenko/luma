@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """CLI routing layer for Luma.
 
-Parses arguments, configures the runtime, and dispatches to the appropriate
+Parses arguments, constructs the EventStore, and dispatches to the appropriate
 command module (command_query, command_refresh, command_chat).
 """
 
@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 import luma.command_chat as command_chat
 import luma.command_query as command_query
 import luma.command_refresh as command_refresh
-import luma.config as config
+from luma.config import DEFAULT_CACHE_DIR
+from luma.event_store import DiskProvider, EventStore
 
 
 def _add_query_args(parser: argparse.ArgumentParser) -> None:
@@ -239,15 +241,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    config.configure(cache_dir=args.cache_dir)
+    cache_dir = (
+        Path(args.cache_dir).expanduser() if args.cache_dir else DEFAULT_CACHE_DIR
+    )
+    store = EventStore(DiskProvider(cache_dir=cache_dir))
     if args.json_output and args.command in ("refresh", "chat"):
         print(f"--json is not supported with '{args.command}'.", file=sys.stderr)
         return 2
     if args.command == "refresh":
-        return command_refresh.run(args.retries)
+        return command_refresh.run(args.retries, store)
     if args.command == "chat":
-        return command_chat.run()
-    return command_query.run(args)
+        return command_chat.run(store)
+    return command_query.run(args, store, cache_dir)
 
 
 if __name__ == "__main__":

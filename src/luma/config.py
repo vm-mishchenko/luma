@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import pathlib
 
-_DEFAULT_CACHE_DIR = pathlib.Path.home() / ".cache" / "luma"
-_cache_dir_override: pathlib.Path | None = None
+DEFAULT_CACHE_DIR = pathlib.Path.home() / ".cache" / "luma"
 
 DEFAULT_WINDOW_DAYS = 14
 CACHE_STALE_HOURS = 12
@@ -37,23 +36,5 @@ HARDCODED_CALENDARS = [
 PAGINATION_LIMIT = "50"
 
 
-def configure(*, cache_dir: str | None = None) -> None:
-    global _cache_dir_override
-    if cache_dir is not None:
-        _cache_dir_override = pathlib.Path(cache_dir).expanduser()
-
-
-def get_cache_dir() -> pathlib.Path:
-    if _cache_dir_override is not None:
-        return _cache_dir_override
-    return _DEFAULT_CACHE_DIR
-
-
-def get_seen_file() -> pathlib.Path:
-    return get_cache_dir() / SEEN_FILENAME
-
-
 def _reset() -> None:
-    """Reset runtime overrides. For testing only."""
-    global _cache_dir_override
-    _cache_dir_override = None
+    """No-op kept for e2e test fixture compatibility."""

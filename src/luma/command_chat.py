@@ -8,6 +8,7 @@ import threading
 import time
 
 from luma.agent import Agent
+from luma.event_store import EventStore
 
 
 class _Spinner:
@@ -42,9 +43,9 @@ class _Spinner:
         print("\r  \r", end="", flush=True)
 
 
-def run() -> int:
+def run(store: EventStore) -> int:
     print("luma chat (Ctrl+D to exit)")
-    agent = Agent()
+    agent = Agent(store=store)
     history: list[dict[str, str]] = []
 
     while True:
