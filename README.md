@@ -70,3 +70,20 @@ Run tests:
 ```shell
 make test
 ```
+
+## Evals
+
+Run agent evaluations using `pydantic-evals` (installed via `make setup`):
+
+```shell
+# List available eval sets
+make eval
+
+# Run a specific eval set
+make eval SET=smoke
+
+# Verbose output (per-evaluator detail)
+make eval SET=smoke VERBOSE=1
+```
+
+Add a new eval set by creating a Python file in `evals/` that defines a `dataset` variable.

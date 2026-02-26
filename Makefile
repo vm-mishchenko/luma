@@ -1,7 +1,7 @@
 VENV := .venv
 BIN  := $(VENV)/bin
 
-.PHONY: setup clean test run
+.PHONY: setup clean test run eval
 
 setup:
 	python3 -m venv $(VENV)
@@ -20,3 +20,10 @@ test:
 
 run:
 	$(BIN)/luma
+
+eval:
+ifndef SET
+	$(BIN)/python -m evals.runner --list
+else
+	$(BIN)/python -m evals.runner --set $(SET) $(if $(VERBOSE),--verbose)
+endif
