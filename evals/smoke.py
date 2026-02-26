@@ -6,8 +6,8 @@ from datetime import datetime, timedelta, timezone
 
 from pydantic_evals import Case, Dataset
 
-from agent import Agent, TextResult
-from query import QueryParams
+from luma.agent import Agent, TextResult
+from luma.query import QueryParams
 
 from .evaluators import NotEmpty, ResultTypeMatch
 from .models import QueryInput

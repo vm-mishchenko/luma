@@ -12,11 +12,10 @@ dependencies = []
 dev = ["pytest", "pexpect", "pydantic-evals"]
 
 [project.scripts]
-luma = "cli:main"
+luma = "luma.cli:main"
 
-[tool.setuptools]
-py-modules = ["cli", "config", "command_chat", "command_query", "command_refresh", "query", "refresh", "download"]
-packages = ["agent"]
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.setuptools.package-dir]
 "" = "src"

@@ -20,8 +20,8 @@ from unittest import mock
 
 import pytest
 
-import cli
-import config
+import luma.cli as cli
+import luma.config as config
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +98,7 @@ def test_query_no_cache_exits_1(tmp_path, capsys):
 
 
 def test_refresh_success(tmp_path, capsys):
-    with mock.patch("refresh.download_events", return_value=SAMPLE_EVENTS):
+    with mock.patch("luma.refresh.download_events", return_value=SAMPLE_EVENTS):
         rc = _run_cli(["--cache-dir", str(tmp_path), "refresh"])
     assert rc == 0
     err = capsys.readouterr().err
@@ -109,7 +109,7 @@ def test_refresh_success(tmp_path, capsys):
 
 
 def test_refresh_network_error(tmp_path, capsys):
-    with mock.patch("refresh.download_events", side_effect=OSError("net down")):
+    with mock.patch("luma.refresh.download_events", side_effect=OSError("net down")):
         rc = _run_cli(["--cache-dir", str(tmp_path), "refresh"])
     assert rc == 1
     assert "net down" in capsys.readouterr().err
@@ -132,7 +132,7 @@ def test_stale_cache_warns(tmp_path, capsys):
 
 
 def test_refresh_retries_forwarded(tmp_path):
-    with mock.patch("refresh.download_events", return_value=[]) as m:
+    with mock.patch("luma.refresh.download_events", return_value=[]) as m:
         _run_cli(["--cache-dir", str(tmp_path), "refresh", "--retries", "3"])
     assert m.call_args.kwargs["retries"] == 3
 
@@ -179,14 +179,14 @@ def test_show_all_includes_seen(tmp_path, capsys):
 def test_free_text_prints_stub_response(tmp_path, capsys):
     rc = _run_cli(["--cache-dir", str(tmp_path), "hello"])
     assert rc == 0
-    from agent import Agent
+    from luma.agent import Agent
     assert Agent.RESPONSE in capsys.readouterr().out
 
 
 def test_free_text_with_flags(tmp_path, capsys):
     rc = _run_cli(["--cache-dir", str(tmp_path), "--days", "7", "hello"])
     assert rc == 0
-    from agent import Agent
+    from luma.agent import Agent
     assert Agent.RESPONSE in capsys.readouterr().out
 
 
@@ -197,7 +197,7 @@ def test_empty_free_text_falls_through(tmp_path, capsys):
 
 
 def test_free_text_event_list_result(tmp_path, capsys):
-    from agent.agent import EventListResult
+    from luma.agent.agent import EventListResult
 
     sample = [
         {
@@ -213,7 +213,7 @@ def test_free_text_event_list_result(tmp_path, capsys):
             "guest_count": 150,
         },
     ]
-    with mock.patch("agent.agent.Agent.query", return_value=EventListResult(events=sample)):
+    with mock.patch("luma.agent.agent.Agent.query", return_value=EventListResult(events=sample)):
         rc = _run_cli(["--cache-dir", str(tmp_path), "find events"])
     assert rc == 0
     out = capsys.readouterr().out
@@ -229,7 +229,7 @@ def test_free_text_out_text_result(tmp_path, capsys):
 
 
 def test_free_text_out_event_list(tmp_path, capsys):
-    from agent.agent import EventListResult
+    from luma.agent.agent import EventListResult
 
     sample = [
         {
@@ -240,7 +240,7 @@ def test_free_text_out_event_list(tmp_path, capsys):
         },
     ]
     out_file = tmp_path / "out.json"
-    with mock.patch("agent.agent.Agent.query", return_value=EventListResult(events=sample)):
+    with mock.patch("luma.agent.agent.Agent.query", return_value=EventListResult(events=sample)):
         rc = _run_cli(["--cache-dir", str(tmp_path), "--out", str(out_file), "find events"])
     assert rc == 0
     assert out_file.is_file()
@@ -250,7 +250,7 @@ def test_free_text_out_event_list(tmp_path, capsys):
 
 
 def test_free_text_agent_exception(tmp_path, capsys):
-    with mock.patch("agent.agent.Agent.query", side_effect=RuntimeError("boom")):
+    with mock.patch("luma.agent.agent.Agent.query", side_effect=RuntimeError("boom")):
         rc = _run_cli(["--cache-dir", str(tmp_path), "hello"])
     assert rc == 1
     assert "boom" in capsys.readouterr().err

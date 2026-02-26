@@ -8,8 +8,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-import config
-from agent import Agent, AgentResult
+import luma.config as config
+from luma.agent import Agent, AgentResult
 
 from .helpers import write_cache
 from .models import QueryInput

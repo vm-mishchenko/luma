@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from pydantic_evals.evaluators import Evaluator, EvaluatorContext
 
-from agent import EventListResult, TextResult
+from luma.agent import EventListResult, TextResult
 
 
 @dataclass
