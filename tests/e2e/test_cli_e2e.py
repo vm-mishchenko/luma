@@ -169,3 +169,88 @@ def test_show_all_includes_seen(tmp_path, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "AI Meetup" in out
+
+
+# ---------------------------------------------------------------------------
+# Free-text query (Agent) tests
+# ---------------------------------------------------------------------------
+
+
+def test_free_text_prints_stub_response(tmp_path, capsys):
+    rc = _run_cli(["--cache-dir", str(tmp_path), "hello"])
+    assert rc == 0
+    from agent import Agent
+    assert Agent.RESPONSE in capsys.readouterr().out
+
+
+def test_free_text_with_flags(tmp_path, capsys):
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--days", "7", "hello"])
+    assert rc == 0
+    from agent import Agent
+    assert Agent.RESPONSE in capsys.readouterr().out
+
+
+def test_empty_free_text_falls_through(tmp_path, capsys):
+    rc = _run_cli(["--cache-dir", str(tmp_path), ""])
+    assert rc == 1
+    assert "No cached events" in capsys.readouterr().err
+
+
+def test_free_text_event_list_result(tmp_path, capsys):
+    from agent.agent import EventListResult
+
+    sample = [
+        {
+            "title": "Agent Event A",
+            "url": "https://luma.com/agent-a",
+            "start_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            "guest_count": 200,
+        },
+        {
+            "title": "Agent Event B",
+            "url": "https://luma.com/agent-b",
+            "start_at": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
+            "guest_count": 150,
+        },
+    ]
+    with mock.patch("agent.agent.Agent.query", return_value=EventListResult(events=sample)):
+        rc = _run_cli(["--cache-dir", str(tmp_path), "find events"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Agent Event A" in out
+    assert "Agent Event B" in out
+
+
+def test_free_text_out_text_result(tmp_path, capsys):
+    out_file = tmp_path / "out.json"
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--out", str(out_file), "hello"])
+    assert rc == 0
+    assert not out_file.exists()
+
+
+def test_free_text_out_event_list(tmp_path, capsys):
+    from agent.agent import EventListResult
+
+    sample = [
+        {
+            "title": "Agent Event A",
+            "url": "https://luma.com/agent-a",
+            "start_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            "guest_count": 200,
+        },
+    ]
+    out_file = tmp_path / "out.json"
+    with mock.patch("agent.agent.Agent.query", return_value=EventListResult(events=sample)):
+        rc = _run_cli(["--cache-dir", str(tmp_path), "--out", str(out_file), "find events"])
+    assert rc == 0
+    assert out_file.is_file()
+    data = json.loads(out_file.read_text(encoding="utf-8"))
+    assert "events" in data
+    assert data["events"][0]["title"] == "Agent Event A"
+
+
+def test_free_text_agent_exception(tmp_path, capsys):
+    with mock.patch("agent.agent.Agent.query", side_effect=RuntimeError("boom")):
+        rc = _run_cli(["--cache-dir", str(tmp_path), "hello"])
+    assert rc == 1
+    assert "boom" in capsys.readouterr().err

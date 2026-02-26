@@ -36,6 +36,16 @@ luma --search 'AI' --day Tue,Thu
 luma --min-time 18 --max-time 21
 ```
 
+Free-text query (routed through the agent):
+
+```shell
+# Ask a question
+luma "what events are happening this week?"
+
+# Combine with filter flags
+luma --days 7 "AI meetups"
+```
+
 Manage seen events:
 
 ```shell

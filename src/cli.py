@@ -203,6 +203,58 @@ def _add_query_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+class _ParseRetry(Exception):
+    pass
+
+
+def _parse_with_query_text(
+    parser: argparse.ArgumentParser, argv: list[str] | None
+) -> argparse.Namespace:
+    """Parse *argv* with fallback extraction of a trailing free-text query.
+
+    Argparse subparsers consume the first positional as a subcommand. When that
+    positional is actually free text (e.g. ``luma "hello"``), the normal parse
+    fails. This helper catches that failure, extracts the trailing positional,
+    and re-parses without it.
+    """
+    original_error = parser.error
+    _caught: list[str] = []
+
+    def _capture_error(message: str):  # noqa: ANN202
+        _caught.append(message)
+        raise _ParseRetry(message)
+
+    # Attempt 1: standard parse (handles subcommands and flag-only queries).
+    parser.error = _capture_error  # type: ignore[assignment]
+    try:
+        args = parser.parse_args(argv)
+        args.query_text = None
+        return args
+    except (_ParseRetry, SystemExit):
+        pass
+    finally:
+        parser.error = original_error  # type: ignore[assignment]
+
+    # Attempt 2: extract trailing positional as free-text query.
+    raw = sys.argv[1:] if argv is None else list(argv)
+    if raw and not raw[-1].startswith("-") and raw[-1] not in {"refresh", "chat"}:
+        candidate = raw[-1]
+        rest = raw[:-1]
+        parser.error = _capture_error  # type: ignore[assignment]
+        try:
+            args = parser.parse_args(rest)
+            args.query_text = candidate
+            return args
+        except (_ParseRetry, SystemExit):
+            pass
+        finally:
+            parser.error = original_error  # type: ignore[assignment]
+
+    # Let the parser report the original error.
+    parser.parse_args(argv)
+    raise SystemExit(2)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -262,7 +314,68 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Interactive chat with Luma assistant.",
     )
     _add_query_args(parser)
-    return parser.parse_args(argv)
+    return _parse_with_query_text(parser, argv)
+
+
+def _build_query_params(args: argparse.Namespace) -> QueryParams:
+    return QueryParams(
+        days=args.days,
+        from_date=args.from_date,
+        to_date=args.to_date,
+        min_guest=args.min_guest,
+        max_guest=args.max_guest,
+        min_time=args.min_time,
+        max_time=args.max_time,
+        day=args.day,
+        exclude=args.exclude,
+        search=args.search,
+        regex=args.regex,
+        glob=args.glob,
+        sort=args.sort,
+        show_all=args.show_all,
+    )
+
+
+def _print_events(
+    events: list[dict],
+    *,
+    sort: str,
+    show_all: bool = False,
+    seen_urls: set[str] | None = None,
+) -> None:
+    print(f"Top {len(events)} events (sorted by {sort}):")
+    score_width = max(
+        (len(f"[{int(item['guest_count'])}]") for item in events), default=3
+    )
+    date_width = max(
+        (len(format_los_angeles_time(item["start_at"])) for item in events),
+        default=0,
+    )
+    la_tz = ZoneInfo(TIMEZONE_NAME)
+    bold = "\033[1m"
+    dim = "\033[2m"
+    reset_ansi = "\033[0m"
+    highlight_days = {1, 3}
+    prev_iso_week: tuple[int, int] | None = None
+    for item in events:
+        dt_la = parse_iso8601_utc(item["start_at"]).astimezone(la_tz)
+        if sort == "date":
+            iso_year, iso_week, _ = dt_la.isocalendar()
+            current_week = (iso_year, iso_week)
+            if prev_iso_week is not None and current_week != prev_iso_week:
+                print()
+            prev_iso_week = current_week
+
+        start = format_los_angeles_time(item["start_at"])
+        score = item["guest_count"]
+        score_text = f"[{score}]".ljust(score_width)
+        date_text = start.ljust(date_width)
+        line = f"{score_text} {date_text} | {item['title']} | {item['url']}"
+        if show_all and seen_urls and item["url"] in seen_urls:
+            line = f"{dim}{line}{reset_ansi}"
+        elif dt_la.weekday() in highlight_days:
+            line = f"{bold}{line}{reset_ansi}"
+        print(line)
 
 
 def cmd_query(args: argparse.Namespace) -> int:
@@ -295,22 +408,7 @@ def cmd_query(args: argparse.Namespace) -> int:
 
     seen_urls = load_seen_urls()
 
-    params = QueryParams(
-        days=args.days,
-        from_date=args.from_date,
-        to_date=args.to_date,
-        min_guest=args.min_guest,
-        max_guest=args.max_guest,
-        min_time=args.min_time,
-        max_time=args.max_time,
-        day=args.day,
-        exclude=args.exclude,
-        search=args.search,
-        regex=args.regex,
-        glob=args.glob,
-        sort=args.sort,
-        show_all=args.show_all,
-    )
+    params = _build_query_params(args)
     try:
         result = query_events(params, seen_urls=seen_urls)
     except CacheError as e:
@@ -348,34 +446,7 @@ def cmd_query(args: argparse.Namespace) -> int:
             json.dump(output, f, indent=2)
 
     top_n = result.events[: args.top]
-    print(f"Top {len(top_n)} events (sorted by {args.sort}):")
-    score_width = max((len(f"[{int(item['guest_count'])}]") for item in top_n), default=3)
-    date_width = max((len(format_los_angeles_time(item["start_at"])) for item in top_n), default=0)
-    la_tz = ZoneInfo(TIMEZONE_NAME)
-    bold = "\033[1m"
-    dim = "\033[2m"
-    reset_ansi = "\033[0m"
-    highlight_days = {1, 3}
-    prev_iso_week: tuple[int, int] | None = None
-    for item in top_n:
-        dt_la = parse_iso8601_utc(item["start_at"]).astimezone(la_tz)
-        if args.sort == "date":
-            iso_year, iso_week, _ = dt_la.isocalendar()
-            current_week = (iso_year, iso_week)
-            if prev_iso_week is not None and current_week != prev_iso_week:
-                print()
-            prev_iso_week = current_week
-
-        start = format_los_angeles_time(item["start_at"])
-        score = item["guest_count"]
-        score_text = f"[{score}]".ljust(score_width)
-        date_text = start.ljust(date_width)
-        line = f"{score_text} {date_text} | {item['title']} | {item['url']}"
-        if args.show_all and item["url"] in seen_urls:
-            line = f"{dim}{line}{reset_ansi}"
-        elif dt_la.weekday() in highlight_days:
-            line = f"{bold}{line}{reset_ansi}"
-        print(line)
+    _print_events(top_n, sort=args.sort, show_all=args.show_all, seen_urls=seen_urls)
 
     if args.discard:
         new_seen = seen_urls | {item["url"] for item in top_n}
@@ -387,6 +458,33 @@ def cmd_query(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_agent_query(args: argparse.Namespace) -> int:
+    """Route a free-text query through the Agent and render the result."""
+    from agent import Agent, EventListResult, TextResult
+
+    params = _build_query_params(args)
+    try:
+        agent = Agent()
+        result = agent.query(args.query_text, params)
+    except Exception as exc:
+        print(f"Agent error: {exc}", file=sys.stderr)
+        return 1
+
+    if isinstance(result, TextResult):
+        if result.text:
+            print(result.text)
+        return 0
+
+    if isinstance(result, EventListResult):
+        _print_events(result.events[: args.top], sort=args.sort)
+        if args.out:
+            with open(args.out, "w", encoding="utf-8") as f:
+                json.dump({"events": result.events}, f, indent=2)
+        return 0
+
+    return 0
+
+
 def main() -> int:
     args = parse_args()
     config.configure(cache_dir=args.cache_dir)
@@ -394,6 +492,8 @@ def main() -> int:
         return cmd_refresh(args.retries)
     if args.command == "chat":
         return cmd_chat()
+    if args.query_text:
+        return cmd_agent_query(args)
     return cmd_query(args)
 
 

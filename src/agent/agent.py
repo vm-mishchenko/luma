@@ -3,6 +3,23 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import dataclass
+from typing import Any
+
+from query import QueryParams
+
+
+@dataclass
+class EventListResult:
+    events: list[dict[str, Any]]
+
+
+@dataclass
+class TextResult:
+    text: str
+
+
+AgentResult = EventListResult | TextResult
 
 
 class Agent:
@@ -14,3 +31,7 @@ class Agent:
         _ = messages
         for token in self.RESPONSE.split():
             yield token
+
+    def query(self, text: str, params: QueryParams) -> AgentResult:
+        _ = text, params
+        return TextResult(text=self.RESPONSE)
