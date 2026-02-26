@@ -42,7 +42,7 @@ class _Spinner:
         print("\r  \r", end="", flush=True)
 
 
-def cmd_chat() -> int:
+def run() -> int:
     print("luma chat (Ctrl+D to exit)")
     agent = Agent()
     history: list[dict[str, str]] = []

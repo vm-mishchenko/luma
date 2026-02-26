@@ -15,7 +15,7 @@ dev = ["pytest", "pexpect"]
 luma = "cli:main"
 
 [tool.setuptools]
-py-modules = ["cli", "config", "chat", "query", "refresh", "download"]
+py-modules = ["cli", "config", "command_chat", "command_query", "command_refresh", "query", "refresh", "download"]
 packages = ["agent"]
 
 [tool.setuptools.package-dir]

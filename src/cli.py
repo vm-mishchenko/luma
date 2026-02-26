@@ -1,100 +1,19 @@
 #!/usr/bin/env python3
-"""Rank Luma events across hardcoded categories and calendars.
+"""CLI routing layer for Luma.
 
-Spec implemented:
-- Hardcoded categories: ai, tech
-- Hardcoded calendars: genai-sf, sf, frontiertower (ID resolved if absent)
-- Hardcoded geo context: lat=37.33939, lon=-121.89496
-- Default sort by date (secondary rank by guest_count)
-- Hardcoded dedupe by url
-- Seen/discard: events marked via --discard are hidden on subsequent runs
-- CLI:
-  - --days (default 14), or --from-date/--to-date (YYYYMMDD)
-  - --top (default 30)
-  - --discard (mark displayed events as seen)
-  - --all (show seen events grayed out)
-  - --reset (clear seen state)
-- Auto-pagination via next_cursor
-- Retry/backoff + basic rate-limit handling
+Parses arguments, configures the runtime, and dispatches to the appropriate
+command module (command_query, command_refresh, command_chat).
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import sys
-import urllib.error
-from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
 
+import command_chat
+import command_query
+import command_refresh
 import config
-from chat import cmd_chat
-from config import (
-    DEFAULT_WINDOW_DAYS,
-    HARDCODED_LAT,
-    HARDCODED_LON,
-    TIMEZONE_NAME,
-)
-from query import (
-    CacheError,
-    CacheInfo,
-    QueryParams,
-    QueryValidationError,
-    check_cache_staleness,
-    parse_iso8601_utc,
-    query_events,
-)
-from refresh import refresh
-
-
-def format_los_angeles_time(value: str) -> str:
-    dt_la = parse_iso8601_utc(value).astimezone(ZoneInfo(TIMEZONE_NAME))
-    month = dt_la.strftime("%b")
-    day = dt_la.day
-    hour = dt_la.hour % 12 or 12
-    ampm = "AM" if dt_la.hour < 12 else "PM"
-    if dt_la.minute == 0:
-        time_part = f"{hour}{ampm}"
-    else:
-        time_part = f"{hour}:{dt_la.minute:02d}{ampm}"
-    today = datetime.now(ZoneInfo(TIMEZONE_NAME)).date()
-    if dt_la.date() == today:
-        weekday = "Today"
-    else:
-        weekday = dt_la.strftime("%a")
-    return f"{weekday} {month} {day}, {time_part}"
-
-
-def load_seen_urls() -> set[str]:
-    seen_file = config.get_seen_file()
-    if not seen_file.is_file():
-        return set()
-    try:
-        with open(seen_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, list):
-            return set(data)
-    except (json.JSONDecodeError, OSError):
-        pass
-    return set()
-
-
-def save_seen_urls(urls: set[str]) -> None:
-    cache_dir = config.get_cache_dir()
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    with open(config.get_seen_file(), "w", encoding="utf-8") as f:
-        json.dump(sorted(urls), f, indent=2)
-
-
-def cmd_refresh(retries: int) -> int:
-    """Fetch events from all sources and write to cache."""
-    try:
-        count, path = refresh(retries=retries)
-    except (urllib.error.URLError, urllib.error.HTTPError, OSError) as err:
-        print(f"Error fetching events: {err}", file=sys.stderr)
-        return 1
-    print(f"Cached {count} events to {path}", file=sys.stderr)
-    return 0
 
 
 def _add_query_args(parser: argparse.ArgumentParser) -> None:
@@ -317,184 +236,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return _parse_with_query_text(parser, argv)
 
 
-def _build_query_params(args: argparse.Namespace) -> QueryParams:
-    return QueryParams(
-        days=args.days,
-        from_date=args.from_date,
-        to_date=args.to_date,
-        min_guest=args.min_guest,
-        max_guest=args.max_guest,
-        min_time=args.min_time,
-        max_time=args.max_time,
-        day=args.day,
-        exclude=args.exclude,
-        search=args.search,
-        regex=args.regex,
-        glob=args.glob,
-        sort=args.sort,
-        show_all=args.show_all,
-    )
-
-
-def _print_events(
-    events: list[dict],
-    *,
-    sort: str,
-    show_all: bool = False,
-    seen_urls: set[str] | None = None,
-) -> None:
-    print(f"Top {len(events)} events (sorted by {sort}):")
-    score_width = max(
-        (len(f"[{int(item['guest_count'])}]") for item in events), default=3
-    )
-    date_width = max(
-        (len(format_los_angeles_time(item["start_at"])) for item in events),
-        default=0,
-    )
-    la_tz = ZoneInfo(TIMEZONE_NAME)
-    bold = "\033[1m"
-    dim = "\033[2m"
-    reset_ansi = "\033[0m"
-    highlight_days = {1, 3}
-    prev_iso_week: tuple[int, int] | None = None
-    for item in events:
-        dt_la = parse_iso8601_utc(item["start_at"]).astimezone(la_tz)
-        if sort == "date":
-            iso_year, iso_week, _ = dt_la.isocalendar()
-            current_week = (iso_year, iso_week)
-            if prev_iso_week is not None and current_week != prev_iso_week:
-                print()
-            prev_iso_week = current_week
-
-        start = format_los_angeles_time(item["start_at"])
-        score = item["guest_count"]
-        score_text = f"[{score}]".ljust(score_width)
-        date_text = start.ljust(date_width)
-        line = f"{score_text} {date_text} | {item['title']} | {item['url']}"
-        if show_all and seen_urls and item["url"] in seen_urls:
-            line = f"{dim}{line}{reset_ansi}"
-        elif dt_la.weekday() in highlight_days:
-            line = f"{bold}{line}{reset_ansi}"
-        print(line)
-
-
-def cmd_query(args: argparse.Namespace) -> int:
-    """Query cached events with filters and display results."""
-    if args.discard and args.show_all:
-        print("--discard and --all are mutually exclusive.", file=sys.stderr)
-        return 2
-    if args.discard and args.reset:
-        print("--discard and --reset are mutually exclusive.", file=sys.stderr)
-        return 2
-
-    if args.reset:
-        seen_file = config.get_seen_file()
-        if seen_file.is_file():
-            seen_file.unlink()
-            print("Cleared seen events.", file=sys.stderr)
-        else:
-            print("No seen events to clear.", file=sys.stderr)
-
-    staleness = check_cache_staleness()
-    if staleness is not None and staleness.is_stale:
-        age_days = staleness.age.days
-        if age_days >= 1:
-            print(f"Warning: cache is {age_days} day{'s' if age_days != 1 else ''} old. "
-                  "Run 'luma refresh' to update.", file=sys.stderr)
-        else:
-            age_hours = int(staleness.age.total_seconds() // 3600)
-            print(f"Warning: cache is {age_hours} hours old. "
-                  "Run 'luma refresh' to update.", file=sys.stderr)
-
-    seen_urls = load_seen_urls()
-
-    params = _build_query_params(args)
-    try:
-        result = query_events(params, seen_urls=seen_urls)
-    except CacheError as e:
-        print(str(e), file=sys.stderr)
-        return 1
-    except QueryValidationError as e:
-        print(str(e), file=sys.stderr)
-        return 2
-
-    now_utc = datetime.now(timezone.utc)
-    has_date_args = args.from_date is not None or args.to_date is not None
-    output = {
-        "generated_at": now_utc.isoformat(),
-        "window_days": args.days
-        if args.days is not None
-        else (DEFAULT_WINDOW_DAYS if not has_date_args else None),
-        "from_date": args.from_date,
-        "to_date": args.to_date,
-        "window_start_utc": result.window_start_utc.isoformat(),
-        "window_end_utc": result.window_end_utc.isoformat(),
-        "rank_by": "guest_count",
-        "sort": args.sort,
-        "min_guest": args.min_guest,
-        "max_guest": args.max_guest,
-        "min_time": args.min_time,
-        "max_time": args.max_time,
-        "dedupe_by": "url",
-        "lat": HARDCODED_LAT,
-        "lon": HARDCODED_LON,
-        "total_events_after_dedupe": result.total_after_filter,
-        "events": result.events,
-    }
-    if args.out:
-        with open(args.out, "w", encoding="utf-8") as f:
-            json.dump(output, f, indent=2)
-
-    top_n = result.events[: args.top]
-    _print_events(top_n, sort=args.sort, show_all=args.show_all, seen_urls=seen_urls)
-
-    if args.discard:
-        new_seen = seen_urls | {item["url"] for item in top_n}
-        save_seen_urls(new_seen)
-        print(f"Marked {len(top_n)} events as seen.", file=sys.stderr)
-
-    if args.out:
-        print(f"\nSaved full output: {args.out}")
-    return 0
-
-
-def cmd_agent_query(args: argparse.Namespace) -> int:
-    """Route a free-text query through the Agent and render the result."""
-    from agent import Agent, EventListResult, TextResult
-
-    params = _build_query_params(args)
-    try:
-        agent = Agent()
-        result = agent.query(args.query_text, params)
-    except Exception as exc:
-        print(f"Agent error: {exc}", file=sys.stderr)
-        return 1
-
-    if isinstance(result, TextResult):
-        if result.text:
-            print(result.text)
-        return 0
-
-    if isinstance(result, EventListResult):
-        _print_events(result.events[: args.top], sort=args.sort)
-        if args.out:
-            with open(args.out, "w", encoding="utf-8") as f:
-                json.dump({"events": result.events}, f, indent=2)
-        return 0
-
-    return 0
-
-
 def main() -> int:
     args = parse_args()
     config.configure(cache_dir=args.cache_dir)
     if args.command == "refresh":
-        return cmd_refresh(args.retries)
+        return command_refresh.run(args.retries)
     if args.command == "chat":
-        return cmd_chat()
-    if args.query_text:
-        return cmd_agent_query(args)
-    return cmd_query(args)
+        return command_chat.run()
+    return command_query.run(args)
 
 
 if __name__ == "__main__":
