@@ -35,6 +35,11 @@ HARDCODED_CALENDARS = [
 ]
 PAGINATION_LIMIT = "50"
 
+ANTHROPIC_API_KEY_ENV = "LUMA_ANTHROPIC_API_KEY"
+DEFAULT_AGENT_MODEL = "claude-haiku-4-5-20251001"
+DEFAULT_AGENT_MAX_ITERATIONS = 5
+AGENT_MAX_TOKENS = 4096
+
 
 def _reset() -> None:
     """No-op kept for e2e test fixture compatibility."""

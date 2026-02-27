@@ -55,7 +55,15 @@ def _make_task():
     return task
 
 
+def _load_env_local() -> None:
+    from dotenv import load_dotenv
+
+    env_file = Path(__file__).resolve().parents[1] / ".env.local"
+    load_dotenv(env_file, override=False)
+
+
 def main() -> int:
+    _load_env_local()
     parser = argparse.ArgumentParser(description="Run agent eval sets")
     parser.add_argument("--set", dest="eval_set", help="Eval set name to run")
     parser.add_argument("--list", action="store_true", help="List available eval sets")

@@ -176,18 +176,22 @@ def test_show_all_includes_seen(tmp_path, capsys):
 # ---------------------------------------------------------------------------
 
 
-def test_free_text_prints_stub_response(tmp_path, capsys):
-    rc = _run_cli(["--cache-dir", str(tmp_path), "hello"])
+def test_free_text_prints_agent_response(tmp_path, capsys):
+    from luma.agent.agent import TextResult
+
+    with mock.patch("luma.agent.agent.Agent.query", return_value=TextResult(text="Here are your events.")):
+        rc = _run_cli(["--cache-dir", str(tmp_path), "hello"])
     assert rc == 0
-    from luma.agent import Agent
-    assert Agent.RESPONSE in capsys.readouterr().out
+    assert "Here are your events." in capsys.readouterr().out
 
 
 def test_free_text_with_flags(tmp_path, capsys):
-    rc = _run_cli(["--cache-dir", str(tmp_path), "--days", "7", "hello"])
+    from luma.agent.agent import TextResult
+
+    with mock.patch("luma.agent.agent.Agent.query", return_value=TextResult(text="Here are your events.")):
+        rc = _run_cli(["--cache-dir", str(tmp_path), "--days", "7", "hello"])
     assert rc == 0
-    from luma.agent import Agent
-    assert Agent.RESPONSE in capsys.readouterr().out
+    assert "Here are your events." in capsys.readouterr().out
 
 
 def test_empty_free_text_falls_through(tmp_path, capsys):
@@ -222,7 +226,9 @@ def test_free_text_event_list_result(tmp_path, capsys):
 
 
 def test_free_text_agent_exception(tmp_path, capsys):
-    with mock.patch("luma.agent.agent.Agent.query", side_effect=RuntimeError("boom")):
+    from luma.agent.agent import AgentError
+
+    with mock.patch("luma.agent.agent.Agent.query", side_effect=AgentError("boom")):
         rc = _run_cli(["--cache-dir", str(tmp_path), "hello"])
     assert rc == 1
     assert "boom" in capsys.readouterr().err
@@ -248,12 +254,14 @@ def test_json_query(tmp_path, capsys):
 
 
 def test_json_agent_text(tmp_path, capsys):
-    rc = _run_cli(["--cache-dir", str(tmp_path), "--json", "hello"])
+    from luma.agent.agent import TextResult
+
+    with mock.patch("luma.agent.agent.Agent.query", return_value=TextResult(text="hello response")):
+        rc = _run_cli(["--cache-dir", str(tmp_path), "--json", "hello"])
     assert rc == 0
     data = json.loads(capsys.readouterr().out)
     assert data["type"] == "text"
-    from luma.agent import Agent
-    assert data["text"] == Agent.RESPONSE
+    assert data["text"] == "hello response"
 
 
 def test_json_agent_events(tmp_path, capsys):

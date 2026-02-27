@@ -211,13 +211,13 @@ def _query(
 
 
 def _agent_query(args: argparse.Namespace, store: EventStore) -> int:
-    from luma.agent import Agent, EventListResult, TextResult
+    from luma.agent import Agent, AgentError, EventListResult, TextResult
 
     params = _build_query_params(args)
     try:
         agent = Agent(store=store)
         result = agent.query(args.query_text, params)
-    except Exception as exc:
+    except AgentError as exc:
         print(f"Agent error: {exc}", file=sys.stderr)
         return 1
 

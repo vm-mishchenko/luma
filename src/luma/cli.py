@@ -18,6 +18,14 @@ from luma.config import DEFAULT_CACHE_DIR
 from luma.event_store import DiskProvider, EventStore
 
 
+def _load_env_local() -> None:
+    """Load .env.local from the project root if it exists."""
+    from dotenv import load_dotenv
+
+    env_file = Path(__file__).resolve().parents[2] / ".env.local"
+    load_dotenv(env_file, override=False)
+
+
 def _add_query_args(parser: argparse.ArgumentParser) -> None:
     """Register query-related flags on *parser*."""
     parser.add_argument(
@@ -240,6 +248,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main() -> int:
+    _load_env_local()
     args = parse_args()
     cache_dir = (
         Path(args.cache_dir).expanduser() if args.cache_dir else DEFAULT_CACHE_DIR

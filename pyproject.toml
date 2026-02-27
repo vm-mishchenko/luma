@@ -6,13 +6,16 @@ build-backend = "setuptools.build_meta"
 name = "luma"
 version = "0.1.0"
 requires-python = ">= 3.12"
-dependencies = []
+dependencies = ["anthropic", "pydantic", "python-dotenv"]
 
 [project.optional-dependencies]
 dev = ["pytest", "pexpect", "pydantic-evals"]
 
 [project.scripts]
 luma = "luma.cli:main"
+
+[tool.setuptools.package-data]
+"luma.agent" = ["prompts/*.txt"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

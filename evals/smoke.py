@@ -6,10 +6,9 @@ from datetime import datetime, timedelta, timezone
 
 from pydantic_evals import Case, Dataset
 
-from luma.agent import Agent, TextResult
 from luma.event_store import QueryParams
 
-from .evaluators import NotEmpty, ResultTypeMatch
+from .evaluators import NotEmpty
 from .models import QueryInput
 
 FIXTURE_EVENTS = [
@@ -39,8 +38,6 @@ dataset = Dataset(
                 params=QueryParams(),
                 events=FIXTURE_EVENTS,
             ),
-            expected_output=TextResult(text=Agent.RESPONSE),
-            evaluators=[ResultTypeMatch()],
         ),
         Case(
             name="filter_large_events",
@@ -49,8 +46,6 @@ dataset = Dataset(
                 params=QueryParams(min_guest=100),
                 events=FIXTURE_EVENTS,
             ),
-            expected_output=TextResult(text=Agent.RESPONSE),
-            evaluators=[ResultTypeMatch()],
         ),
     ],
     evaluators=[NotEmpty()],
