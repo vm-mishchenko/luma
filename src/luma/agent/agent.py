@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from zoneinfo import ZoneInfo
 
 from luma.config import (
+    AGENT_LLM_TIMEOUT_SECONDS,
     AGENT_MAX_PARALLEL_TOOLS,
     AGENT_MAX_TOKENS,
     AGENT_TOOL_TIMEOUT_SECONDS,
@@ -190,12 +191,10 @@ class Agent:
                 loader.start("Thinking")
             try:
                 t0 = time.perf_counter()
-                response = client.messages.create(
-                    model=self._model,
-                    max_tokens=AGENT_MAX_TOKENS,
-                    system=system_prompt,
+                response = self._create_llm_response(
+                    client=client,
+                    system_prompt=system_prompt,
                     messages=messages,
-                    tools=[QUERY_EVENTS_TOOL],
                 )
                 if self._debug:
                     elapsed = time.perf_counter() - t0
@@ -309,6 +308,30 @@ class Agent:
             params_str = json.dumps(params_dict, indent=2)
             return f"{text}\n\nUser-provided filters:\n{params_str}"
         return text
+
+    def _create_llm_response(
+        self,
+        *,
+        client: anthropic.Anthropic,
+        system_prompt: str,
+        messages: list[dict[str, Any]],
+    ) -> Any:
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            future = ex.submit(
+                client.messages.create,
+                model=self._model,
+                max_tokens=AGENT_MAX_TOKENS,
+                system=system_prompt,
+                messages=messages,
+                tools=[QUERY_EVENTS_TOOL],
+            )
+            try:
+                return future.result(timeout=AGENT_LLM_TIMEOUT_SECONDS)
+            except FuturesTimeoutError as exc:
+                raise AgentError(
+                    "LLM response timed out after "
+                    f"{AGENT_LLM_TIMEOUT_SECONDS}s"
+                ) from exc
 
     def _execute_tool(
         self, name: str, tool_input: dict[str, Any]
