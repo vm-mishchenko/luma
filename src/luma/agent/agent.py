@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal, Protocol, Union
 
 import anthropic
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
@@ -45,6 +45,7 @@ class AgentError(Exception):
 @dataclass
 class EventListResult:
     events: list[dict[str, Any]]
+    intro: str | None = None
 
 
 @dataclass
@@ -53,6 +54,39 @@ class TextResult:
 
 
 AgentResult = EventListResult | TextResult
+
+
+# ---------------------------------------------------------------------------
+# Output types for query_iter (extensible)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class TextOutput:
+    """Text block from the LLM (printed to stderr)."""
+
+    text: str
+
+
+@dataclass
+class ToolFetchOutput:
+    """Feedback when events were fetched (printed to stderr)."""
+
+    count: int
+
+
+@dataclass
+class FinalResult:
+    """Final agent result (printed to stdout)."""
+
+    result: AgentResult
+
+
+AgentOutput = TextOutput | ToolFetchOutput | FinalResult
+
+
+class _Loader(Protocol):
+    def start(self, label: str) -> None: ...
+    def stop(self) -> None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +165,14 @@ class Agent:
         for token in self.RESPONSE.split():
             yield token
 
-    def query(self, text: str, params: QueryParams) -> AgentResult:
+    def query_iter(
+        self,
+        text: str,
+        params: QueryParams,
+        *,
+        loader: _Loader | None = None,
+    ) -> Iterator[AgentOutput]:
+        """Yields TextOutput, ToolFetchOutput at any point, FinalResult at the end."""
         api_key = os.environ.get(ANTHROPIC_API_KEY_ENV)
         if not api_key:
             raise AgentError(
@@ -145,6 +186,8 @@ class Agent:
         messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
 
         for _ in range(self._max_iterations):
+            if loader:
+                loader.start("Thinking")
             try:
                 t0 = time.perf_counter()
                 response = client.messages.create(
@@ -161,19 +204,39 @@ class Agent:
                         file=sys.stderr,
                     )
             except anthropic.APIError as exc:
+                if loader:
+                    loader.stop()
                 raise AgentError(f"Anthropic API error: {exc}") from exc
+            finally:
+                if loader:
+                    loader.stop()
+
+            # Yield text blocks from this turn (before tool_use)
+            turn_text = "".join(
+                block.text
+                for block in response.content
+                if hasattr(block, "text")
+            )
+            # Skip TextOutput for final turn; caller prints intro + formatted events
+            if turn_text.strip() and response.stop_reason != "end_turn":
+                yield TextOutput(text=turn_text.strip())
 
             if response.stop_reason == "tool_use":
                 tool_use_blocks = [
                     block for block in response.content
                     if block.type == "tool_use"
                 ]
+                yield TextOutput(text="Searching events...")
                 tool_results = []
-                for batch_start in range(0, len(tool_use_blocks), AGENT_MAX_PARALLEL_TOOLS):
+                for batch_start in range(
+                    0, len(tool_use_blocks), AGENT_MAX_PARALLEL_TOOLS
+                ):
                     batch = tool_use_blocks[
                         batch_start : batch_start + AGENT_MAX_PARALLEL_TOOLS
                     ]
-                    with ThreadPoolExecutor(max_workers=AGENT_MAX_PARALLEL_TOOLS) as ex:
+                    with ThreadPoolExecutor(
+                        max_workers=AGENT_MAX_PARALLEL_TOOLS
+                    ) as ex:
                         futures = [
                             ex.submit(self._execute_tool, block.name, block.input)
                             for block in batch
@@ -197,21 +260,34 @@ class Agent:
                                     "is_error": is_error,
                                 }
                             )
+                query_events_count = sum(
+                    1 for b in tool_use_blocks if b.name == "query_events"
+                )
+                if query_events_count > 0:
+                    yield ToolFetchOutput(count=query_events_count)
+
                 messages.append({"role": "assistant", "content": response.content})
                 messages.append({"role": "user", "content": tool_results})
                 continue
 
             if response.stop_reason == "end_turn":
-                final_text = "".join(
-                    block.text
-                    for block in response.content
-                    if hasattr(block, "text")
-                )
-                return self._parse_response(final_text)
+                result = self._parse_response(turn_text)
+                yield FinalResult(result=result)
+                return
 
         raise AgentError(
             f"Agent exceeded maximum iterations ({self._max_iterations})"
         )
+
+    def query(self, text: str, params: QueryParams) -> AgentResult:
+        """Backward-compatible: consume query_iter and return the last FinalResult."""
+        last_result: AgentResult | None = None
+        for item in self.query_iter(text, params):
+            if isinstance(item, FinalResult):
+                last_result = item.result
+        if last_result is None:
+            raise AgentError("Agent produced no result")
+        return last_result
 
     # -- private ------------------------------------------------------------
 
@@ -284,4 +360,12 @@ class Agent:
 
         if isinstance(parsed, TextResponse):
             return TextResult(text=parsed.text)
-        return EventListResult(events=parsed.events)
+
+        # Extract intro text before JSON for EventListResult
+        intro: str | None = None
+        if obj_match and obj_match.start() > 0:
+            intro_text = cleaned[: obj_match.start()].strip()
+            if intro_text:
+                intro = intro_text
+
+        return EventListResult(events=parsed.events, intro=intro)

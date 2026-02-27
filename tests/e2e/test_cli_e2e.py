@@ -177,18 +177,24 @@ def test_show_all_includes_seen(tmp_path, capsys):
 
 
 def test_free_text_prints_agent_response(tmp_path, capsys):
-    from luma.agent.agent import TextResult
+    from luma.agent.agent import FinalResult, TextResult
 
-    with mock.patch("luma.agent.agent.Agent.query", return_value=TextResult(text="Here are your events.")):
+    def _mock_query_iter(*args, **kwargs):
+        yield FinalResult(result=TextResult(text="Here are your events."))
+
+    with mock.patch("luma.agent.agent.Agent.query_iter", side_effect=_mock_query_iter):
         rc = _run_cli(["--cache-dir", str(tmp_path), "hello"])
     assert rc == 0
     assert "Here are your events." in capsys.readouterr().out
 
 
 def test_free_text_with_flags(tmp_path, capsys):
-    from luma.agent.agent import TextResult
+    from luma.agent.agent import FinalResult, TextResult
 
-    with mock.patch("luma.agent.agent.Agent.query", return_value=TextResult(text="Here are your events.")):
+    def _mock_query_iter(*args, **kwargs):
+        yield FinalResult(result=TextResult(text="Here are your events."))
+
+    with mock.patch("luma.agent.agent.Agent.query_iter", side_effect=_mock_query_iter):
         rc = _run_cli(["--cache-dir", str(tmp_path), "--days", "7", "hello"])
     assert rc == 0
     assert "Here are your events." in capsys.readouterr().out
@@ -201,7 +207,7 @@ def test_empty_free_text_falls_through(tmp_path, capsys):
 
 
 def test_free_text_event_list_result(tmp_path, capsys):
-    from luma.agent.agent import EventListResult
+    from luma.agent.agent import EventListResult, FinalResult
 
     sample = [
         {
@@ -217,7 +223,11 @@ def test_free_text_event_list_result(tmp_path, capsys):
             "guest_count": 150,
         },
     ]
-    with mock.patch("luma.agent.agent.Agent.query", return_value=EventListResult(events=sample)):
+
+    def _mock_query_iter(*args, **kwargs):
+        yield FinalResult(result=EventListResult(events=sample))
+
+    with mock.patch("luma.agent.agent.Agent.query_iter", side_effect=_mock_query_iter):
         rc = _run_cli(["--cache-dir", str(tmp_path), "find events"])
     assert rc == 0
     out = capsys.readouterr().out
@@ -228,7 +238,10 @@ def test_free_text_event_list_result(tmp_path, capsys):
 def test_free_text_agent_exception(tmp_path, capsys):
     from luma.agent.agent import AgentError
 
-    with mock.patch("luma.agent.agent.Agent.query", side_effect=AgentError("boom")):
+    def _mock_query_iter(*args, **kwargs):
+        raise AgentError("boom")
+
+    with mock.patch("luma.agent.agent.Agent.query_iter", side_effect=_mock_query_iter):
         rc = _run_cli(["--cache-dir", str(tmp_path), "hello"])
     assert rc == 1
     assert "boom" in capsys.readouterr().err

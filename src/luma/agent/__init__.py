@@ -1,5 +1,25 @@
 """Agent package exports."""
 
-from luma.agent.agent import Agent, AgentError, AgentResult, EventListResult, TextResult
+from luma.agent.agent import (
+    Agent,
+    AgentError,
+    AgentOutput,
+    AgentResult,
+    EventListResult,
+    FinalResult,
+    TextOutput,
+    TextResult,
+    ToolFetchOutput,
+)
 
-__all__ = ["Agent", "AgentError", "AgentResult", "EventListResult", "TextResult"]
+__all__ = [
+    "Agent",
+    "AgentError",
+    "AgentOutput",
+    "AgentResult",
+    "EventListResult",
+    "FinalResult",
+    "TextOutput",
+    "TextResult",
+    "ToolFetchOutput",
+]

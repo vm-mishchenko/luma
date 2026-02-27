@@ -6,6 +6,8 @@ import argparse
 import json
 import pathlib
 import sys
+import threading
+import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -23,6 +25,48 @@ from luma.event_store import (
     QueryValidationError,
     parse_iso8601_utc,
 )
+
+_DIM = "\033[2m" if sys.stderr.isatty() else ""
+_RESET = "\033[0m" if sys.stderr.isatty() else ""
+
+
+class _Loader:
+    """Spinner with label, writes to stderr. Suppressed when not a TTY."""
+
+    _FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+
+    def __init__(self) -> None:
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._label = ""
+
+    def start(self, label: str) -> None:
+        if not sys.stdout.isatty():
+            return
+        self._label = label
+        if self._thread is not None:
+            return
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        idx = 0
+        while not self._stop_event.is_set():
+            frame = self._FRAMES[idx % len(self._FRAMES)]
+            print(f"\r{frame} {self._label} ", end="", file=sys.stderr, flush=True)
+            idx += 1
+            time.sleep(0.08)
+
+    def stop(self) -> None:
+        if self._thread is None:
+            return
+        self._stop_event.set()
+        self._thread.join()
+        self._thread = None
+        if sys.stdout.isatty():
+            # Clear the line (EL: erase from cursor to end)
+            print("\r\033[K", end="", file=sys.stderr, flush=True)
 
 
 def _format_los_angeles_time(value: str) -> str:
@@ -211,17 +255,25 @@ def _query(
 
 
 def _agent_query(args: argparse.Namespace, store: EventStore) -> int:
-    from luma.agent import Agent, AgentError, EventListResult, TextResult
+    from luma.agent import (
+        Agent,
+        AgentError,
+        EventListResult,
+        FinalResult,
+        TextOutput,
+        TextResult,
+    )
 
     params = _build_query_params(args)
-    try:
-        agent = Agent(store=store, debug=getattr(args, "debug", False))
-        result = agent.query(args.query_text, params)
-    except AgentError as exc:
-        print(f"Agent error: {exc}", file=sys.stderr)
-        return 1
+    agent = Agent(store=store, debug=getattr(args, "debug", False))
 
     if args.json_output:
+        # Suppress all intermediate output; use query() and output only final JSON
+        try:
+            result = agent.query(args.query_text, params)
+        except AgentError as exc:
+            print(f"Agent error: {exc}", file=sys.stderr)
+            return 1
         if isinstance(result, TextResult):
             print(json.dumps({"type": "text", "text": result.text}, indent=2))
         elif isinstance(result, EventListResult):
@@ -232,14 +284,27 @@ def _agent_query(args: argparse.Namespace, store: EventStore) -> int:
             }, indent=2))
         return 0
 
-    if isinstance(result, TextResult):
-        if result.text:
-            print(result.text)
-        return 0
-
-    if isinstance(result, EventListResult):
-        _print_events(result.events[: args.top], sort=args.sort)
-        return 0
+    # Use query_iter with loader; intermediate output to stderr, final to stdout
+    loader = _Loader()
+    try:
+        for item in agent.query_iter(args.query_text, params, loader=loader):
+            if isinstance(item, TextOutput):
+                print(f"{_DIM}{item.text}{_RESET}", file=sys.stderr)
+            elif isinstance(item, FinalResult):
+                result = item.result
+                if isinstance(result, TextResult):
+                    if result.text:
+                        print(result.text)
+                elif isinstance(result, EventListResult):
+                    if result.intro:
+                        print(result.intro)
+                    _print_events(
+                        result.events[: args.top], sort=args.sort
+                    )
+    except AgentError as exc:
+        loader.stop()
+        print(f"Agent error: {exc}", file=sys.stderr)
+        return 1
 
     return 0
 
