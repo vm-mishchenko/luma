@@ -215,7 +215,7 @@ def _agent_query(args: argparse.Namespace, store: EventStore) -> int:
 
     params = _build_query_params(args)
     try:
-        agent = Agent(store=store)
+        agent = Agent(store=store, debug=getattr(args, "debug", False))
         result = agent.query(args.query_text, params)
     except AgentError as exc:
         print(f"Agent error: {exc}", file=sys.stderr)

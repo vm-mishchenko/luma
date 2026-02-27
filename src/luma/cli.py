@@ -233,6 +233,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         dest="json_output",
         help="Output structured JSON to stdout instead of human-readable text.",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging (e.g. agent tool call params).",
+    )
     subparsers = parser.add_subparsers(dest="command")
     refresh_parser = subparsers.add_parser(
         "refresh",

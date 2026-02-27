@@ -6,6 +6,7 @@ import json
 import os
 import pathlib
 import re
+import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
@@ -113,10 +114,12 @@ class Agent:
         *,
         model: str = DEFAULT_AGENT_MODEL,
         max_iterations: int = DEFAULT_AGENT_MAX_ITERATIONS,
+        debug: bool = False,
     ) -> None:
         self._store = store
         self._model = model
         self._max_iterations = max_iterations
+        self._debug = debug
 
     def run(self, messages: list[dict[str, str]]) -> Iterator[str]:
         _ = messages
@@ -208,6 +211,8 @@ class Agent:
             return (f"Unknown tool: {name}", True)
         try:
             params = QueryParams.model_validate(tool_input)
+            if self._debug:
+                print(f"[debug] query_events params: {params.model_dump(exclude_none=True)}", file=sys.stderr)
             result = self._store.query(params)
             return (json.dumps(result.events), False)
         except (ValidationError, QueryValidationError, CacheError) as exc:
