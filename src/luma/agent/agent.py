@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import json
 import os
 import pathlib
@@ -74,78 +73,29 @@ RESPONSE_ADAPTER: TypeAdapter[TextResponse | EventsResponse] = TypeAdapter(
 
 
 # ---------------------------------------------------------------------------
-# Tool schema
+# Tool schema (generated from QueryParams)
 # ---------------------------------------------------------------------------
 
-QUERY_EVENTS_TOOL: dict[str, Any] = {
-    "name": "query_events",
-    "description": (
-        "Search and filter events from the database. "
-        "Returns matching events sorted by the specified criteria."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "days": {
-                "type": "integer",
-                "description": "Number of days from today to include. Mutually exclusive with from_date/to_date.",
-            },
-            "from_date": {
-                "type": "string",
-                "description": "Start date in YYYYMMDD format (inclusive). Mutually exclusive with days.",
-            },
-            "to_date": {
-                "type": "string",
-                "description": "End date in YYYYMMDD format (inclusive). Mutually exclusive with days.",
-            },
-            "min_guest": {
-                "type": "integer",
-                "description": "Minimum guest count to include (default: 50).",
-            },
-            "max_guest": {
-                "type": "integer",
-                "description": "Maximum guest count to include.",
-            },
-            "min_time": {
-                "type": "integer",
-                "description": "Minimum event start hour in Los Angeles time (0-23).",
-            },
-            "max_time": {
-                "type": "integer",
-                "description": "Maximum event start hour in Los Angeles time (0-23).",
-            },
-            "day": {
-                "type": "string",
-                "description": "Comma-separated weekday filter, e.g. 'Sat,Sun'. Case-insensitive.",
-            },
-            "exclude": {
-                "type": "string",
-                "description": "Comma-separated keywords to exclude from titles (case-insensitive).",
-            },
-            "search": {
-                "type": "string",
-                "description": "Keyword search in event titles (case-insensitive). Mutually exclusive with regex and glob.",
-            },
-            "regex": {
-                "type": "string",
-                "description": "Regex pattern to match event titles (case-insensitive). Mutually exclusive with search and glob.",
-            },
-            "glob": {
-                "type": "string",
-                "description": "Glob pattern to match event titles (case-insensitive, e.g. '*AI*meetup*'). Mutually exclusive with search and regex.",
-            },
-            "sort": {
-                "type": "string",
-                "enum": ["date", "guest"],
-                "description": "Sort by event date (default) or guest count.",
-            },
-        },
-        "required": [],
-    },
-}
+def _build_tool_schema() -> dict[str, Any]:
+    schema = QueryParams.model_json_schema()
+    schema.pop("title", None)
+    for key in ("show_all",):
+        schema.get("properties", {}).pop(key, None)
+    return {
+        "name": "query_events",
+        "description": (
+            "Search and filter events from the database. "
+            "Returns matching events sorted by the specified criteria."
+        ),
+        "input_schema": schema,
+    }
+
+
+QUERY_EVENTS_TOOL: dict[str, Any] = _build_tool_schema()
 
 _PROMPTS_DIR = pathlib.Path(__file__).parent / "prompts"
-_MARKDOWN_FENCE_RE = re.compile(r"^```(?:json)?\s*\n(.*?)\n```\s*$", re.DOTALL)
+_MARKDOWN_FENCE_RE = re.compile(r"```(?:json)?\s*\n(.*?)\n```", re.DOTALL)
+_JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +182,7 @@ class Agent:
     # -- private ------------------------------------------------------------
 
     def _build_system_prompt(self) -> str:
-        template = (_PROMPTS_DIR / "system.txt").read_text(encoding="utf-8")
+        template = (_PROMPTS_DIR / "system.md").read_text(encoding="utf-8")
         now = datetime.now(ZoneInfo(TIMEZONE_NAME))
         current_datetime = now.strftime("%A, %B %d, %Y, %I:%M %p %Z")
         response_schema = json.dumps(
@@ -244,11 +194,7 @@ class Agent:
         )
 
     def _build_user_message(self, text: str, params: QueryParams) -> str:
-        params_dict = {
-            k: v
-            for k, v in dataclasses.asdict(params).items()
-            if v is not None
-        }
+        params_dict = params.model_dump(exclude_none=True)
         if params_dict:
             params_str = json.dumps(params_dict, indent=2)
             return f"{text}\n\nUser-provided filters:\n{params_str}"
@@ -261,39 +207,37 @@ class Agent:
         if name != "query_events":
             return (f"Unknown tool: {name}", True)
         try:
-            params = QueryParams(
-                days=tool_input.get("days"),
-                from_date=tool_input.get("from_date"),
-                to_date=tool_input.get("to_date"),
-                min_guest=tool_input.get("min_guest", 50),
-                max_guest=tool_input.get("max_guest"),
-                min_time=tool_input.get("min_time"),
-                max_time=tool_input.get("max_time"),
-                day=tool_input.get("day"),
-                exclude=tool_input.get("exclude"),
-                search=tool_input.get("search"),
-                regex=tool_input.get("regex"),
-                glob=tool_input.get("glob"),
-                sort=tool_input.get("sort", "date"),
-                show_all=False,
-            )
+            params = QueryParams.model_validate(tool_input)
             result = self._store.query(params)
             return (json.dumps(result.events), False)
-        except (QueryValidationError, CacheError) as exc:
+        except (ValidationError, QueryValidationError, CacheError) as exc:
             return (f"Tool error: {exc}", True)
 
     def _parse_response(self, text: str) -> AgentResult:
         cleaned = text.strip()
-        fence_match = _MARKDOWN_FENCE_RE.match(cleaned)
-        if fence_match:
-            cleaned = fence_match.group(1)
 
-        try:
-            data = json.loads(cleaned)
-        except json.JSONDecodeError as exc:
+        # Try full text first, then fenced block, then first JSON object.
+        candidates = [cleaned]
+        fence_match = _MARKDOWN_FENCE_RE.search(cleaned)
+        if fence_match:
+            candidates.append(fence_match.group(1))
+        obj_match = _JSON_OBJECT_RE.search(cleaned)
+        if obj_match:
+            candidates.append(obj_match.group(0))
+
+        data = None
+        last_exc: json.JSONDecodeError | None = None
+        for candidate in candidates:
+            try:
+                data = json.loads(candidate)
+                break
+            except json.JSONDecodeError as exc:
+                last_exc = exc
+
+        if data is None:
             raise AgentError(
-                f"Agent returned invalid JSON: {exc}\nResponse: {text[:500]}"
-            ) from exc
+                f"Agent returned invalid JSON: {last_exc}\nResponse: {text[:500]}"
+            ) from last_exc
 
         try:
             parsed = RESPONSE_ADAPTER.validate_python(data)

@@ -13,12 +13,14 @@ import pathlib
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
+from pydantic import BaseModel, Field
 from zoneinfo import ZoneInfo
 
 from luma.config import (
     CACHE_STALE_HOURS,
+    DEFAULT_SORT,
     DEFAULT_WINDOW_DAYS,
     EVENTS_CACHE_GLOB,
     EVENTS_FILENAME_PREFIX,
@@ -42,21 +44,20 @@ class CacheError(Exception):
 # Data types
 # ---------------------------------------------------------------------------
 
-@dataclass
-class QueryParams:
-    days: int | None = None
-    from_date: str | None = None
-    to_date: str | None = None
-    min_guest: int = 50
-    max_guest: int | None = None
-    min_time: int | None = None
-    max_time: int | None = None
-    day: str | None = None
-    exclude: str | None = None
-    search: str | None = None
-    regex: str | None = None
-    glob: str | None = None
-    sort: str = "date"
+class QueryParams(BaseModel):
+    days: int | None = Field(None, description="Number of days from today to include. Mutually exclusive with from_date/to_date.")
+    from_date: str | None = Field(None, description="Start date in YYYYMMDD format (inclusive). Mutually exclusive with days.")
+    to_date: str | None = Field(None, description="End date in YYYYMMDD format (inclusive). Mutually exclusive with days.")
+    min_guest: int | None = Field(None, description="Minimum guest count to include.")
+    max_guest: int | None = Field(None, description="Maximum guest count to include.")
+    min_time: int | None = Field(None, description="Minimum event start hour in Los Angeles time (0-23).")
+    max_time: int | None = Field(None, description="Maximum event start hour in Los Angeles time (0-23).")
+    day: str | None = Field(None, description="Comma-separated weekday filter, e.g. 'Sat,Sun'. Case-insensitive.")
+    exclude: str | None = Field(None, description="Comma-separated keywords to exclude from titles (case-insensitive).")
+    search: str | None = Field(None, description="Keyword search in event titles (case-insensitive). Mutually exclusive with regex and glob.")
+    regex: str | None = Field(None, description="Regex pattern to match event titles (case-insensitive). Mutually exclusive with search and glob.")
+    glob: str | None = Field(None, description="Glob pattern to match event titles (case-insensitive, e.g. '*AI*meetup*'). Mutually exclusive with search and regex.")
+    sort: Literal["date", "guest"] = Field(DEFAULT_SORT, description="Sort by event date (default) or guest count.")
     show_all: bool = False
 
 
@@ -299,10 +300,11 @@ def _filter_and_sort_events(
         item for item in events
         if start_utc <= parse_iso8601_utc(item["start_at"]) < end_utc
     ]
-    filtered = [
-        item for item in filtered
-        if int(item["guest_count"]) >= params.min_guest
-    ]
+    if params.min_guest is not None:
+        filtered = [
+            item for item in filtered
+            if int(item["guest_count"]) >= params.min_guest
+        ]
     if params.max_guest is not None:
         filtered = [
             item for item in filtered

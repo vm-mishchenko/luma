@@ -14,7 +14,12 @@ from pathlib import Path
 import luma.command_chat as command_chat
 import luma.command_query as command_query
 import luma.command_refresh as command_refresh
-from luma.config import DEFAULT_CACHE_DIR
+from luma.config import (
+    DEFAULT_CACHE_DIR,
+    DEFAULT_RETRIES,
+    DEFAULT_SORT,
+    DEFAULT_TOP,
+)
 from luma.event_store import DiskProvider, EventStore
 
 
@@ -49,20 +54,20 @@ def _add_query_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--top",
         type=int,
-        default=100,
-        help="How many events to print after sorting (default: 100).",
+        default=DEFAULT_TOP,
+        help=f"How many events to print after sorting (default: {DEFAULT_TOP}).",
     )
     parser.add_argument(
         "--sort",
         choices=["date", "guest"],
-        default="date",
-        help="Sort by event 'date' (default) or by 'guest'.",
+        default=DEFAULT_SORT,
+        help=f"Sort by event 'date' (default) or by 'guest'.",
     )
     parser.add_argument(
         "--min-guest",
         type=int,
-        default=50,
-        help="Minimum guest_count to include (default: 50).",
+        default=None,
+        help="Minimum guest_count to include.",
     )
     parser.add_argument(
         "--max-guest",
@@ -236,8 +241,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     refresh_parser.add_argument(
         "--retries",
         type=int,
-        default=5,
-        help="Retry attempts for HTTP requests with exponential backoff (default: 5).",
+        default=DEFAULT_RETRIES,
+        help=f"Retry attempts for HTTP requests with exponential backoff (default: {DEFAULT_RETRIES}).",
     )
     subparsers.add_parser(
         "chat",

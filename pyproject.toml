@@ -15,7 +15,7 @@ dev = ["pytest", "pexpect", "pydantic-evals"]
 luma = "luma.cli:main"
 
 [tool.setuptools.package-data]
-"luma.agent" = ["prompts/*.txt"]
+"luma.agent" = ["prompts/*.md"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
