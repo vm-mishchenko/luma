@@ -27,6 +27,7 @@ from luma.config import (
     PAGINATION_LIMIT,
     REQUEST_DELAY_SEC,
 )
+from luma.models import Event, generate_event_id
 
 
 @dataclass
@@ -257,7 +258,7 @@ def _fetch_calendar_events(
     return results
 
 
-def _dedupe_by_url(records: list[_EventRecord]) -> list[dict[str, Any]]:
+def _dedupe_by_url(records: list[_EventRecord]) -> list[Event]:
     merged: dict[str, dict[str, Any]] = {}
     for rec in records:
         if rec.url not in merged:
@@ -277,16 +278,29 @@ def _dedupe_by_url(records: list[_EventRecord]) -> list[dict[str, Any]]:
             existing["start_at"] = rec.start_at
             existing["title"] = rec.title
 
-    out = []
+    events: list[Event] = []
     for item in merged.values():
-        item["sources"] = sorted(item["sources"])
-        out.append(item)
-    return out
+        events.append(Event(
+            id=generate_event_id(item["url"]),
+            title=item["title"],
+            url=item["url"],
+            start_at=item["start_at"],
+            guest_count=item["guest_count"],
+            sources=sorted(item["sources"]),
+        ))
+
+    ids = {e.id for e in events}
+    if len(ids) != len(events):
+        raise ValueError(
+            f"Event ID hash collision detected: {len(events)} events but {len(ids)} unique IDs"
+        )
+
+    return events
 
 
 def download_events(
     *, retries: int, start_utc: datetime, end_utc: datetime
-) -> list[dict[str, Any]]:
+) -> list[Event]:
     """Fetch events from all configured sources and return deduplicated list."""
     all_records: list[_EventRecord] = []
 

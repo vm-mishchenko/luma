@@ -25,6 +25,7 @@ Use `text` type when:
 
 Use `events` type when:
 - The user wants to see a list of events
-- Return the events exactly as received from the query tool, do not modify or omit fields
+- Return only the event `id` values from the query results. Do not return full event objects.
+- If the user did not ask to filter or narrow down results, return all event IDs from the query results.
 
 **Critical**: your final response must contain ONLY a single JSON object, nothing else. No prose, no markdown fences, no explanation before or after. The entire response must be parseable as JSON.

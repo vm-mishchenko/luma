@@ -70,7 +70,7 @@ def main() -> int:
     parser.add_argument("--verbose", action="store_true", help="Show detailed output")
     args = parser.parse_args()
 
-    if args.list or args.eval_set is None:
+    if args.list:
         sets = _list_eval_sets()
         if not sets:
             print("No eval sets found.")
@@ -79,6 +79,9 @@ def main() -> int:
             for name in sets:
                 print(f"  {name}")
         return 0
+
+    if args.eval_set is None:
+        args.eval_set = "smoke"
 
     dataset = _load_dataset(args.eval_set)
     task = _make_task()

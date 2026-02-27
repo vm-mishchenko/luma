@@ -26,6 +26,7 @@ from luma.config import (
     EVENTS_FILENAME_PREFIX,
     TIMEZONE_NAME,
 )
+from luma.models import Event
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +70,7 @@ class CacheInfo:
 
 @dataclass
 class QueryResult:
-    events: list[dict[str, Any]]
+    events: list[Event]
     total_after_filter: int
     window_start_utc: datetime
     window_end_utc: datetime
@@ -93,8 +94,8 @@ def is_on_or_after_min_time(start_at: str, min_hour: int) -> bool:
 # ---------------------------------------------------------------------------
 
 class EventProvider(Protocol):
-    def load(self) -> list[dict[str, Any]]: ...
-    def save(self, events: list[dict[str, Any]], fetched_at: datetime) -> None: ...
+    def load(self) -> list[Event]: ...
+    def save(self, events: list[Event], fetched_at: datetime) -> None: ...
     def check_staleness(self) -> CacheInfo: ...
 
 
@@ -104,17 +105,20 @@ class DiskProvider:
     def __init__(self, cache_dir: pathlib.Path) -> None:
         self._cache_dir = cache_dir
 
-    def load(self) -> list[dict[str, Any]]:
+    def load(self) -> list[Event]:
         path = self._find_latest_cache()
         if path is None:
             raise CacheError("No cached events. Run 'luma refresh' first.")
         return self._load_cache(path)
 
-    def save(self, events: list[dict[str, Any]], fetched_at: datetime) -> None:
+    def save(self, events: list[Event], fetched_at: datetime) -> None:
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         stamp = fetched_at.strftime("%Y-%m-%d_%H-%M-%S")
         filename = f"{EVENTS_FILENAME_PREFIX}{stamp}.json"
-        payload = {"fetched_at": fetched_at.isoformat(), "events": events}
+        payload = {
+            "fetched_at": fetched_at.isoformat(),
+            "events": [e.to_dict() for e in events],
+        }
         path = self._cache_dir / filename
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
@@ -140,11 +144,11 @@ class DiskProvider:
             return None
         return candidates[0]
 
-    def _load_cache(self, path: pathlib.Path) -> list[dict[str, Any]]:
+    def _load_cache(self, path: pathlib.Path) -> list[Event]:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            return data["events"]
+            return [Event.from_dict(d) for d in data["events"]]
         except (json.JSONDecodeError, KeyError, OSError) as err:
             raise CacheError(f"Cannot read cache file {path}: {err}") from err
 
@@ -152,13 +156,13 @@ class DiskProvider:
 class MemoryProvider:
     """Holds events in memory.  Used by the eval runner."""
 
-    def __init__(self, events: list[dict[str, Any]]) -> None:
+    def __init__(self, events: list[Event]) -> None:
         self._events = events
 
-    def load(self) -> list[dict[str, Any]]:
+    def load(self) -> list[Event]:
         return self._events
 
-    def save(self, events: list[dict[str, Any]], fetched_at: datetime) -> None:
+    def save(self, events: list[Event], fetched_at: datetime) -> None:
         self._events = events
 
     def check_staleness(self) -> CacheInfo:
@@ -188,7 +192,12 @@ class EventStore:
         events = self._provider.load()
         return _filter_and_sort_events(events, params, seen_urls=seen_urls)
 
-    def save(self, events: list[dict[str, Any]], fetched_at: datetime) -> None:
+    def get_by_ids(self, ids: list[str]) -> list[Event]:
+        events = self._provider.load()
+        index = {e.id: e for e in events}
+        return [index[eid] for eid in dict.fromkeys(ids) if eid in index]
+
+    def save(self, events: list[Event], fetched_at: datetime) -> None:
         self._provider.save(events, fetched_at)
 
     def check_staleness(self) -> CacheInfo:
@@ -200,7 +209,7 @@ class EventStore:
 # ---------------------------------------------------------------------------
 
 def _filter_and_sort_events(
-    events: list[dict[str, Any]],
+    events: list[Event],
     params: QueryParams,
     *,
     seen_urls: set[str] | None = None,
@@ -298,33 +307,33 @@ def _filter_and_sort_events(
 
     filtered = [
         item for item in events
-        if start_utc <= parse_iso8601_utc(item["start_at"]) < end_utc
+        if start_utc <= parse_iso8601_utc(item.start_at) < end_utc
     ]
     if params.min_guest is not None:
         filtered = [
             item for item in filtered
-            if int(item["guest_count"]) >= params.min_guest
+            if item.guest_count >= params.min_guest
         ]
     if params.max_guest is not None:
         filtered = [
             item for item in filtered
-            if int(item["guest_count"]) <= params.max_guest
+            if item.guest_count <= params.max_guest
         ]
     if params.min_time is not None:
         filtered = [
             item for item in filtered
-            if is_on_or_after_min_time(item["start_at"], params.min_time)
+            if is_on_or_after_min_time(item.start_at, params.min_time)
         ]
     if params.max_time is not None:
         filtered = [
             item for item in filtered
-            if parse_iso8601_utc(item["start_at"]).astimezone(la_tz).hour
+            if parse_iso8601_utc(item.start_at).astimezone(la_tz).hour
             <= params.max_time
         ]
     if day_filter is not None:
         filtered = [
             item for item in filtered
-            if parse_iso8601_utc(item["start_at"]).astimezone(la_tz).weekday()
+            if parse_iso8601_utc(item.start_at).astimezone(la_tz).weekday()
             in day_filter
         ]
     if params.exclude:
@@ -333,24 +342,24 @@ def _filter_and_sort_events(
         ]
         filtered = [
             item for item in filtered
-            if not any(kw in item["title"].lower() for kw in exclude_keywords)
+            if not any(kw in item.title.lower() for kw in exclude_keywords)
         ]
     if params.search:
         search_term = params.search.lower()
         filtered = [
             item for item in filtered
-            if search_term in item["title"].lower()
+            if search_term in item.title.lower()
         ]
     if regex_pattern is not None:
         filtered = [
             item for item in filtered
-            if regex_pattern.search(item["title"])
+            if regex_pattern.search(item.title)
         ]
     if params.glob is not None:
         glob_pat = params.glob.lower()
         filtered = [
             item for item in filtered
-            if fnmatch.fnmatch(item["title"].lower(), glob_pat)
+            if fnmatch.fnmatch(item.title.lower(), glob_pat)
         ]
 
     # -- sort ----------------------------------------------------------------
@@ -358,17 +367,17 @@ def _filter_and_sort_events(
     if params.sort == "date":
         filtered.sort(
             key=lambda x: (
-                parse_iso8601_utc(x["start_at"]).astimezone(la_tz).date(),
-                -int(x["guest_count"]),
-                x["title"].lower(),
+                parse_iso8601_utc(x.start_at).astimezone(la_tz).date(),
+                -x.guest_count,
+                x.title.lower(),
             )
         )
     else:
         filtered.sort(
             key=lambda x: (
-                -int(x["guest_count"]),
-                parse_iso8601_utc(x["start_at"]),
-                x["title"].lower(),
+                -x.guest_count,
+                parse_iso8601_utc(x.start_at),
+                x.title.lower(),
             )
         )
 
@@ -376,7 +385,7 @@ def _filter_and_sort_events(
 
     if seen_urls is not None and not params.show_all:
         filtered = [
-            item for item in filtered if item["url"] not in seen_urls
+            item for item in filtered if item.url not in seen_urls
         ]
 
     return QueryResult(

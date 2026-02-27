@@ -22,6 +22,7 @@ import pytest
 
 import luma.cli as cli
 import luma.config as config
+from luma.models import Event, generate_event_id
 
 
 # ---------------------------------------------------------------------------
@@ -29,27 +30,30 @@ import luma.config as config
 # ---------------------------------------------------------------------------
 
 SAMPLE_EVENTS = [
-    {
-        "title": "AI Meetup",
-        "url": "https://luma.com/ai-meetup",
-        "start_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
-        "guest_count": 120,
-        "sources": ["category:ai"],
-    },
-    {
-        "title": "Tech Talk",
-        "url": "https://luma.com/tech-talk",
-        "start_at": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
-        "guest_count": 80,
-        "sources": ["category:tech"],
-    },
-    {
-        "title": "Small Event",
-        "url": "https://luma.com/small-event",
-        "start_at": (datetime.now(timezone.utc) + timedelta(days=3)).isoformat(),
-        "guest_count": 10,
-        "sources": ["category:tech"],
-    },
+    Event(
+        id=generate_event_id("https://luma.com/ai-meetup"),
+        title="AI Meetup",
+        url="https://luma.com/ai-meetup",
+        start_at=(datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+        guest_count=120,
+        sources=["category:ai"],
+    ),
+    Event(
+        id=generate_event_id("https://luma.com/tech-talk"),
+        title="Tech Talk",
+        url="https://luma.com/tech-talk",
+        start_at=(datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
+        guest_count=80,
+        sources=["category:tech"],
+    ),
+    Event(
+        id=generate_event_id("https://luma.com/small-event"),
+        title="Small Event",
+        url="https://luma.com/small-event",
+        start_at=(datetime.now(timezone.utc) + timedelta(days=3)).isoformat(),
+        guest_count=10,
+        sources=["category:tech"],
+    ),
 ]
 
 
@@ -61,7 +65,10 @@ def _write_cache(tmp_path, events=None, fetched_at=None):
         events = SAMPLE_EVENTS
     stamp = fetched_at.strftime("%Y-%m-%d_%H-%M-%S")
     path = tmp_path / f"events-{stamp}.json"
-    payload = {"fetched_at": fetched_at.isoformat(), "events": events}
+    payload = {
+        "fetched_at": fetched_at.isoformat(),
+        "events": [e.to_dict() for e in events],
+    }
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return path
 
@@ -209,23 +216,29 @@ def test_empty_free_text_falls_through(tmp_path, capsys):
 def test_free_text_event_list_result(tmp_path, capsys):
     from luma.agent.agent import EventListResult, FinalResult
 
-    sample = [
-        {
-            "title": "Agent Event A",
-            "url": "https://luma.com/agent-a",
-            "start_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
-            "guest_count": 200,
-        },
-        {
-            "title": "Agent Event B",
-            "url": "https://luma.com/agent-b",
-            "start_at": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
-            "guest_count": 150,
-        },
+    agent_events = [
+        Event(
+            id=generate_event_id("https://luma.com/agent-a"),
+            title="Agent Event A",
+            url="https://luma.com/agent-a",
+            start_at=(datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            guest_count=200,
+            sources=["category:test"],
+        ),
+        Event(
+            id=generate_event_id("https://luma.com/agent-b"),
+            title="Agent Event B",
+            url="https://luma.com/agent-b",
+            start_at=(datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
+            guest_count=150,
+            sources=["category:test"],
+        ),
     ]
+    _write_cache(tmp_path, events=agent_events)
+    ids = [e.id for e in agent_events]
 
     def _mock_query_iter(*args, **kwargs):
-        yield FinalResult(result=EventListResult(events=sample))
+        yield FinalResult(result=EventListResult(ids=ids))
 
     with mock.patch("luma.agent.agent.Agent.query_iter", side_effect=_mock_query_iter):
         rc = _run_cli(["--cache-dir", str(tmp_path), "find events"])
@@ -280,15 +293,20 @@ def test_json_agent_text(tmp_path, capsys):
 def test_json_agent_events(tmp_path, capsys):
     from luma.agent.agent import EventListResult
 
-    sample = [
-        {
-            "title": "Agent Event A",
-            "url": "https://luma.com/agent-a",
-            "start_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
-            "guest_count": 200,
-        },
+    agent_events = [
+        Event(
+            id=generate_event_id("https://luma.com/agent-a"),
+            title="Agent Event A",
+            url="https://luma.com/agent-a",
+            start_at=(datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            guest_count=200,
+            sources=["category:test"],
+        ),
     ]
-    with mock.patch("luma.agent.agent.Agent.query", return_value=EventListResult(events=sample)):
+    _write_cache(tmp_path, events=agent_events)
+    ids = [e.id for e in agent_events]
+
+    with mock.patch("luma.agent.agent.Agent.query", return_value=EventListResult(ids=ids)):
         rc = _run_cli(["--cache-dir", str(tmp_path), "--json", "find events"])
     assert rc == 0
     data = json.loads(capsys.readouterr().out)
@@ -324,7 +342,7 @@ def test_json_discard(tmp_path, capsys):
     seen_path = tmp_path / "seen.json"
     assert seen_path.is_file()
     seen = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert set(seen) == {e["url"] for e in SAMPLE_EVENTS if e["guest_count"] >= 0}
+    assert set(seen) == {e.url for e in SAMPLE_EVENTS if e.guest_count >= 0}
 
 
 def test_json_no_cache_empty_stdout(tmp_path, capsys):

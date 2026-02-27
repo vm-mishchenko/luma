@@ -7,25 +7,28 @@ from datetime import datetime, timedelta, timezone
 from pydantic_evals import Case, Dataset
 
 from luma.event_store import QueryParams
+from luma.models import Event, generate_event_id
 
 from .evaluators import NotEmpty
 from .models import QueryInput
 
 FIXTURE_EVENTS = [
-    {
-        "title": "AI Meetup",
-        "url": "https://lu.ma/ai-meetup",
-        "start_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
-        "guest_count": 120,
-        "sources": ["category:ai"],
-    },
-    {
-        "title": "Yoga in the Park",
-        "url": "https://lu.ma/yoga",
-        "start_at": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
-        "guest_count": 30,
-        "sources": ["category:wellness"],
-    },
+    Event(
+        id=generate_event_id("https://lu.ma/ai-meetup"),
+        title="AI Meetup",
+        url="https://lu.ma/ai-meetup",
+        start_at=(datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+        guest_count=120,
+        sources=["category:ai"],
+    ),
+    Event(
+        id=generate_event_id("https://lu.ma/yoga"),
+        title="Yoga in the Park",
+        url="https://lu.ma/yoga",
+        start_at=(datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
+        guest_count=30,
+        sources=["category:wellness"],
+    ),
 ]
 
 dataset = Dataset(

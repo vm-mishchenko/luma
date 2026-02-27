@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from luma.event_store import QueryParams
+from luma.models import Event
 
 
 @dataclass
 class QueryInput:
     prompt: str
     params: QueryParams
-    events: list[dict[str, Any]]
+    events: list[Event]

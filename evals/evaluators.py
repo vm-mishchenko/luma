@@ -27,5 +27,5 @@ class NotEmpty(Evaluator):
         if isinstance(ctx.output, TextResult):
             return bool(ctx.output.text.strip())
         if isinstance(ctx.output, EventListResult):
-            return len(ctx.output.events) > 0
+            return len(ctx.output.ids) > 0
         return False

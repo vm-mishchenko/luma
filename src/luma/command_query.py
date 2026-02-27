@@ -25,6 +25,7 @@ from luma.event_store import (
     QueryValidationError,
     parse_iso8601_utc,
 )
+from luma.models import Event
 
 _DIM = "\033[2m" if sys.stderr.isatty() else ""
 _RESET = "\033[0m" if sys.stderr.isatty() else ""
@@ -128,7 +129,7 @@ def _build_query_params(args: argparse.Namespace) -> QueryParams:
 
 
 def _print_events(
-    events: list[dict],
+    events: list[Event],
     *,
     sort: str,
     show_all: bool = False,
@@ -136,10 +137,10 @@ def _print_events(
 ) -> None:
     print(f"Top {len(events)} events (sorted by {sort}):")
     score_width = max(
-        (len(f"[{int(item['guest_count'])}]") for item in events), default=3
+        (len(f"[{item.guest_count}]") for item in events), default=3
     )
     date_width = max(
-        (len(_format_los_angeles_time(item["start_at"])) for item in events),
+        (len(_format_los_angeles_time(item.start_at)) for item in events),
         default=0,
     )
     la_tz = ZoneInfo(TIMEZONE_NAME)
@@ -149,7 +150,7 @@ def _print_events(
     highlight_days = {1, 3}
     prev_iso_week: tuple[int, int] | None = None
     for item in events:
-        dt_la = parse_iso8601_utc(item["start_at"]).astimezone(la_tz)
+        dt_la = parse_iso8601_utc(item.start_at).astimezone(la_tz)
         if sort == "date":
             iso_year, iso_week, _ = dt_la.isocalendar()
             current_week = (iso_year, iso_week)
@@ -157,12 +158,12 @@ def _print_events(
                 print()
             prev_iso_week = current_week
 
-        start = _format_los_angeles_time(item["start_at"])
-        score = item["guest_count"]
+        start = _format_los_angeles_time(item.start_at)
+        score = item.guest_count
         score_text = f"[{score}]".ljust(score_width)
         date_text = start.ljust(date_width)
-        line = f"{score_text} {date_text} | {item['title']} | {item['url']}"
-        if show_all and seen_urls and item["url"] in seen_urls:
+        line = f"{score_text} {date_text} | {item.title} | {item.url}"
+        if show_all and seen_urls and item.url in seen_urls:
             line = f"{dim}{line}{reset_ansi}"
         elif dt_la.weekday() in highlight_days:
             line = f"{bold}{line}{reset_ansi}"
@@ -233,13 +234,13 @@ def _query(
         "lat": HARDCODED_LAT,
         "lon": HARDCODED_LON,
         "total_events_after_dedupe": result.total_after_filter,
-        "events": result.events,
+        "events": [e.to_dict() for e in result.events],
     }
     if args.json_output:
         output["type"] = "query"
         print(json.dumps(output, indent=2))
         if args.discard:
-            new_seen = seen_urls | {item["url"] for item in result.events}
+            new_seen = seen_urls | {e.url for e in result.events}
             _save_seen_urls(new_seen, cache_dir)
         return 0
 
@@ -247,7 +248,7 @@ def _query(
     _print_events(top_n, sort=args.sort, show_all=args.show_all, seen_urls=seen_urls)
 
     if args.discard:
-        new_seen = seen_urls | {item["url"] for item in top_n}
+        new_seen = seen_urls | {e.url for e in top_n}
         _save_seen_urls(new_seen, cache_dir)
         print(f"Marked {len(top_n)} events as seen.", file=sys.stderr)
 
@@ -264,11 +265,11 @@ def _agent_query(args: argparse.Namespace, store: EventStore) -> int:
         TextResult,
     )
 
+    debug = getattr(args, "debug", False)
     params = _build_query_params(args)
-    agent = Agent(store=store, debug=getattr(args, "debug", False))
+    agent = Agent(store=store, debug=debug)
 
     if args.json_output:
-        # Suppress all intermediate output; use query() and output only final JSON
         try:
             result = agent.query(args.query_text, params)
         except AgentError as exc:
@@ -277,14 +278,17 @@ def _agent_query(args: argparse.Namespace, store: EventStore) -> int:
         if isinstance(result, TextResult):
             print(json.dumps({"type": "text", "text": result.text}, indent=2))
         elif isinstance(result, EventListResult):
+            events = store.get_by_ids(result.ids)
+            if debug and len(events) < len(result.ids):
+                missing = len(result.ids) - len(events)
+                print(f"[debug] {missing} event ID(s) not found in store", file=sys.stderr)
             print(json.dumps({
                 "type": "events",
-                "events": result.events,
-                "total": len(result.events),
+                "events": [e.to_dict() for e in events],
+                "total": len(events),
             }, indent=2))
         return 0
 
-    # Use query_iter with loader; intermediate output to stderr, final to stdout
     loader = _Loader()
     try:
         for item in agent.query_iter(args.query_text, params, loader=loader):
@@ -296,10 +300,12 @@ def _agent_query(args: argparse.Namespace, store: EventStore) -> int:
                     if result.text:
                         print(result.text)
                 elif isinstance(result, EventListResult):
-                    if result.intro:
-                        print(result.intro)
+                    events = store.get_by_ids(result.ids)
+                    if debug and len(events) < len(result.ids):
+                        missing = len(result.ids) - len(events)
+                        print(f"[debug] {missing} event ID(s) not found in store", file=sys.stderr)
                     _print_events(
-                        result.events[: args.top], sort=args.sort
+                        events[: args.top], sort=args.sort
                     )
     except AgentError as exc:
         loader.stop()

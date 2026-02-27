@@ -45,8 +45,7 @@ class AgentError(Exception):
 
 @dataclass
 class EventListResult:
-    events: list[dict[str, Any]]
-    intro: str | None = None
+    ids: list[str]
 
 
 @dataclass
@@ -101,7 +100,7 @@ class TextResponse(BaseModel):
 
 class EventsResponse(BaseModel):
     type: Literal["events"]
-    events: list[dict[str, Any]]
+    ids: list[str]
 
 
 RESPONSE_ADAPTER: TypeAdapter[TextResponse | EventsResponse] = TypeAdapter(
@@ -191,6 +190,14 @@ class Agent:
                 loader.start("Thinking")
             try:
                 t0 = time.perf_counter()
+                msg_chars = sum(
+                    len(str(m.get("content", ""))) for m in messages
+                )
+                print(
+                    f"[debug] Start LLM call: {len(messages)} messages"
+                    f"(system={len(system_prompt)}, messages={msg_chars})",
+                    file=sys.stderr,
+                )
                 response = self._create_llm_response(
                     client=client,
                     system_prompt=system_prompt,
@@ -199,7 +206,7 @@ class Agent:
                 if self._debug:
                     elapsed = time.perf_counter() - t0
                     print(
-                        f"[debug] LLM call: {elapsed:.2f}s, {len(messages)} messages",
+                        f"[debug] End LLM call: {elapsed:.2f}s, {len(messages)} messages",
                         file=sys.stderr,
                     )
             except anthropic.APIError as exc:
@@ -344,7 +351,7 @@ class Agent:
             if self._debug:
                 print(f"[debug] query_events params: {params.model_dump(exclude_none=True)}", file=sys.stderr)
             result = self._store.query(params)
-            return (json.dumps(result.events), False)
+            return (json.dumps([e.to_dict() for e in result.events]), False)
         except (ValidationError, QueryValidationError, CacheError) as exc:
             return (f"Tool error: {exc}", True)
 
@@ -384,11 +391,4 @@ class Agent:
         if isinstance(parsed, TextResponse):
             return TextResult(text=parsed.text)
 
-        # Extract intro text before JSON for EventListResult
-        intro: str | None = None
-        if obj_match and obj_match.start() > 0:
-            intro_text = cleaned[: obj_match.start()].strip()
-            if intro_text:
-                intro = intro_text
-
-        return EventListResult(events=parsed.events, intro=intro)
+        return EventListResult(ids=parsed.ids)
