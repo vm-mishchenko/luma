@@ -7,7 +7,9 @@ import os
 import pathlib
 import re
 import sys
+import time
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any, Literal, Union
@@ -17,7 +19,9 @@ from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from zoneinfo import ZoneInfo
 
 from luma.config import (
+    AGENT_MAX_PARALLEL_TOOLS,
     AGENT_MAX_TOKENS,
+    AGENT_TOOL_TIMEOUT_SECONDS,
     ANTHROPIC_API_KEY_ENV,
     DEFAULT_AGENT_MAX_ITERATIONS,
     DEFAULT_AGENT_MODEL,
@@ -86,7 +90,8 @@ def _build_tool_schema() -> dict[str, Any]:
         "name": "query_events",
         "description": (
             "Search and filter events from the database. "
-            "Returns matching events sorted by the specified criteria."
+            "Returns matching events sorted by the specified criteria. "
+            "When you need multiple independent queries (e.g. compare different date ranges), include all tool calls in one response."
         ),
         "input_schema": schema,
     }
@@ -141,6 +146,7 @@ class Agent:
 
         for _ in range(self._max_iterations):
             try:
+                t0 = time.perf_counter()
                 response = client.messages.create(
                     model=self._model,
                     max_tokens=AGENT_MAX_TOKENS,
@@ -148,24 +154,49 @@ class Agent:
                     messages=messages,
                     tools=[QUERY_EVENTS_TOOL],
                 )
+                if self._debug:
+                    elapsed = time.perf_counter() - t0
+                    print(
+                        f"[debug] LLM call: {elapsed:.2f}s, {len(messages)} messages",
+                        file=sys.stderr,
+                    )
             except anthropic.APIError as exc:
                 raise AgentError(f"Anthropic API error: {exc}") from exc
 
             if response.stop_reason == "tool_use":
+                tool_use_blocks = [
+                    block for block in response.content
+                    if block.type == "tool_use"
+                ]
                 tool_results = []
-                for block in response.content:
-                    if block.type == "tool_use":
-                        result_content, is_error = self._execute_tool(
-                            block.name, block.input
-                        )
-                        tool_results.append(
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": block.id,
-                                "content": result_content,
-                                "is_error": is_error,
-                            }
-                        )
+                for batch_start in range(0, len(tool_use_blocks), AGENT_MAX_PARALLEL_TOOLS):
+                    batch = tool_use_blocks[
+                        batch_start : batch_start + AGENT_MAX_PARALLEL_TOOLS
+                    ]
+                    with ThreadPoolExecutor(max_workers=AGENT_MAX_PARALLEL_TOOLS) as ex:
+                        futures = [
+                            ex.submit(self._execute_tool, block.name, block.input)
+                            for block in batch
+                        ]
+                        for block, future in zip(batch, futures, strict=True):
+                            try:
+                                result_content, is_error = future.result(
+                                    timeout=AGENT_TOOL_TIMEOUT_SECONDS
+                                )
+                            except FuturesTimeoutError:
+                                result_content = (
+                                    f"Tool {block.name} timed out after "
+                                    f"{AGENT_TOOL_TIMEOUT_SECONDS}s"
+                                )
+                                is_error = True
+                            tool_results.append(
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": block.id,
+                                    "content": result_content,
+                                    "is_error": is_error,
+                                }
+                            )
                 messages.append({"role": "assistant", "content": response.content})
                 messages.append({"role": "user", "content": tool_results})
                 continue

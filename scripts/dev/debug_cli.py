@@ -19,7 +19,7 @@ if __name__ == "__main__":
     # Change argv to simulate different CLI invocations.
 
     # Free-text agent query:
-    sys.argv = ["luma", "what events are happening this weekend?"]
+    sys.argv = ["luma", "--debug", "next weekends and next next weekends core agentic talks min guest > 10"]
 
     # Flag-based query:
     # sys.argv = ["luma", "--days", "7", "--min-guest", "100"]
