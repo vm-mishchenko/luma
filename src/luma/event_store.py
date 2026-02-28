@@ -46,7 +46,7 @@ class CacheError(Exception):
 # ---------------------------------------------------------------------------
 
 class QueryParams(BaseModel):
-    days: int | None = Field(None, description="Number of days from today to include. Mutually exclusive with from_date/to_date.")
+    days: int | None = Field(None, description="Window size in days starting from today. days=1 means today only, days=2 means today and tomorrow, etc. For a specific date use from_date/to_date instead. Mutually exclusive with from_date/to_date.")
     from_date: str | None = Field(None, description="Start date in YYYYMMDD format (inclusive). Mutually exclusive with days.")
     to_date: str | None = Field(None, description="End date in YYYYMMDD format (inclusive). Mutually exclusive with days.")
     min_guest: int | None = Field(None, description="Minimum guest count to include.")

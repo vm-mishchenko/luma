@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from pydantic_evals.evaluators import Evaluator, EvaluatorContext
 
-from luma.agent import EventListResult, TextResult
+from luma.agent import EventListResult, QueryParamsResult, TextResult
 
 
 @dataclass
@@ -28,4 +28,6 @@ class NotEmpty(Evaluator):
             return bool(ctx.output.text.strip())
         if isinstance(ctx.output, EventListResult):
             return len(ctx.output.ids) > 0
+        if isinstance(ctx.output, QueryParamsResult):
+            return True
         return False

@@ -18,7 +18,6 @@ from luma.config import (
     DEFAULT_CACHE_DIR,
     DEFAULT_RETRIES,
     DEFAULT_SORT,
-    DEFAULT_TOP,
 )
 from luma.event_store import DiskProvider, EventStore
 
@@ -54,8 +53,8 @@ def _add_query_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--top",
         type=int,
-        default=DEFAULT_TOP,
-        help=f"How many events to print after sorting (default: {DEFAULT_TOP}).",
+        default=None,
+        help="Limit how many events to print after sorting (default: all).",
     )
     parser.add_argument(
         "--sort",
@@ -206,7 +205,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "    Fetch fresh events from all sources and save to cache.\n"
             "\n"
             "  luma\n"
-            "    Show cached events with defaults (14 days, top 100, sort=date).\n"
+            "    Show all cached events with defaults (14 days, sort=date).\n"
             "\n"
             "  luma --days 7 --top 50\n"
             "    Show top 50 cached events in the next 7 days.\n"

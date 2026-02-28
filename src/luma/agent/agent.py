@@ -26,6 +26,7 @@ from luma.config import (
     ANTHROPIC_API_KEY_ENV,
     DEFAULT_AGENT_MAX_ITERATIONS,
     DEFAULT_AGENT_MODEL,
+    DEFAULT_SORT,
     TIMEZONE_NAME,
 )
 from luma.event_store import CacheError, EventStore, QueryParams, QueryValidationError
@@ -53,7 +54,12 @@ class TextResult:
     text: str
 
 
-AgentResult = EventListResult | TextResult
+@dataclass
+class QueryParamsResult:
+    params: QueryParams
+
+
+AgentResult = EventListResult | TextResult | QueryParamsResult
 
 
 # ---------------------------------------------------------------------------
@@ -103,9 +109,41 @@ class EventsResponse(BaseModel):
     ids: list[str]
 
 
-RESPONSE_ADAPTER: TypeAdapter[TextResponse | EventsResponse] = TypeAdapter(
+class AgentQueryParams(BaseModel):
+    """QueryParams subset exposed to the LLM (tool input and query response)."""
+    days: int | None = Field(None, description="Window size in days starting from today. days=1 means today only, days=2 means today and tomorrow. For a specific date use from_date/to_date.")
+    from_date: str | None = Field(None, description="Start date YYYYMMDD (inclusive). Mutually exclusive with days.")
+    to_date: str | None = Field(None, description="End date YYYYMMDD (inclusive). Mutually exclusive with days.")
+    min_guest: int | None = Field(None, description="Minimum guest count.")
+    max_guest: int | None = Field(None, description="Maximum guest count.")
+    min_time: int | None = Field(None, description="Minimum start hour in LA time (0-23).")
+    max_time: int | None = Field(None, description="Maximum start hour in LA time (0-23).")
+    day: str | None = Field(None, description="Comma-separated weekday filter, e.g. 'Sat,Sun'.")
+    sort: Literal["date", "guest"] | None = Field(None, description="Sort by 'date' (default) or 'guest'.")
+
+
+def _to_query_params(agent_params: AgentQueryParams) -> QueryParams:
+    return QueryParams(
+        days=agent_params.days,
+        from_date=agent_params.from_date,
+        to_date=agent_params.to_date,
+        min_guest=agent_params.min_guest,
+        max_guest=agent_params.max_guest,
+        min_time=agent_params.min_time,
+        max_time=agent_params.max_time,
+        day=agent_params.day,
+        sort=agent_params.sort or DEFAULT_SORT,
+    )
+
+
+class QueryResponse(BaseModel):
+    type: Literal["query"]
+    params: AgentQueryParams
+
+
+RESPONSE_ADAPTER: TypeAdapter[TextResponse | EventsResponse | QueryResponse] = TypeAdapter(
     Annotated[
-        Union[TextResponse, EventsResponse],
+        Union[TextResponse, EventsResponse, QueryResponse],
         Field(discriminator="type"),
     ]
 )
@@ -116,10 +154,8 @@ RESPONSE_ADAPTER: TypeAdapter[TextResponse | EventsResponse] = TypeAdapter(
 # ---------------------------------------------------------------------------
 
 def _build_tool_schema() -> dict[str, Any]:
-    schema = QueryParams.model_json_schema()
+    schema = AgentQueryParams.model_json_schema()
     schema.pop("title", None)
-    for key in ("show_all",):
-        schema.get("properties", {}).pop(key, None)
     return {
         "name": "query_events",
         "description": (
@@ -186,18 +222,19 @@ class Agent:
         messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
 
         for _ in range(self._max_iterations):
-            if loader:
+            if loader and not self._debug:
                 loader.start("Thinking")
             try:
                 t0 = time.perf_counter()
-                msg_chars = sum(
-                    len(str(m.get("content", ""))) for m in messages
-                )
-                print(
-                    f"[debug] Start LLM call: {len(messages)} messages"
-                    f"(system={len(system_prompt)}, messages={msg_chars})",
-                    file=sys.stderr,
-                )
+                if self._debug:
+                    msg_chars = sum(
+                        len(str(m.get("content", ""))) for m in messages
+                    )
+                    print(
+                        f"[debug] Start LLM call: {len(messages)} messages"
+                        f"(system={len(system_prompt)}, messages={msg_chars})",
+                        file=sys.stderr,
+                    )
                 response = self._create_llm_response(
                     client=client,
                     system_prompt=system_prompt,
@@ -232,7 +269,14 @@ class Agent:
                     block for block in response.content
                     if block.type == "tool_use"
                 ]
-                yield TextOutput(text="Searching events...")
+                if self._debug:
+                    for b in tool_use_blocks:
+                        print(f"[debug] tool call: {b.name} {b.input}", file=sys.stderr)
+                count = len(tool_use_blocks)
+                if count > 1:
+                    yield TextOutput(text=f"Searching events ({count} queries)...")
+                else:
+                    yield TextOutput(text="Searching events...")
                 tool_results = []
                 for batch_start in range(
                     0, len(tool_use_blocks), AGENT_MAX_PARALLEL_TOOLS
@@ -278,6 +322,11 @@ class Agent:
 
             if response.stop_reason == "end_turn":
                 result = self._parse_response(turn_text)
+                if self._debug:
+                    label = type(result).__name__
+                    if isinstance(result, QueryParamsResult):
+                        label += f" {result.params.model_dump(exclude_none=True)}"
+                    print(f"[debug] response type: {label}", file=sys.stderr)
                 yield FinalResult(result=result)
                 return
 
@@ -301,12 +350,29 @@ class Agent:
         template = (_PROMPTS_DIR / "system.md").read_text(encoding="utf-8")
         now = datetime.now(ZoneInfo(TIMEZONE_NAME))
         current_datetime = now.strftime("%A, %B %d, %Y, %I:%M %p %Z")
+        current_date = now.strftime("%Y%m%d")
         response_schema = json.dumps(
             RESPONSE_ADAPTER.json_schema(), indent=2
         )
+
+        from datetime import timedelta
+        tomorrow = now + timedelta(days=1)
+        days_until_saturday = (5 - now.weekday()) % 7 or 7
+        saturday = now + timedelta(days=days_until_saturday)
+        sunday = saturday + timedelta(days=1)
+        next_monday = saturday + timedelta(days=2)
+        next_sunday = next_monday + timedelta(days=6)
+        fmt = "%Y%m%d"
+
         return template.format(
             current_datetime=current_datetime,
+            current_date=current_date,
             response_schema=response_schema,
+            tomorrow=tomorrow.strftime(fmt),
+            saturday=saturday.strftime(fmt),
+            sunday=sunday.strftime(fmt),
+            next_monday=next_monday.strftime(fmt),
+            next_sunday=next_sunday.strftime(fmt),
         )
 
     def _build_user_message(self, text: str, params: QueryParams) -> str:
@@ -347,9 +413,8 @@ class Agent:
         if name != "query_events":
             return (f"Unknown tool: {name}", True)
         try:
-            params = QueryParams.model_validate(tool_input)
-            if self._debug:
-                print(f"[debug] query_events params: {params.model_dump(exclude_none=True)}", file=sys.stderr)
+            agent_params = AgentQueryParams.model_validate(tool_input)
+            params = _to_query_params(agent_params)
             result = self._store.query(params)
             return (json.dumps([e.to_dict() for e in result.events]), False)
         except (ValidationError, QueryValidationError, CacheError) as exc:
@@ -390,5 +455,8 @@ class Agent:
 
         if isinstance(parsed, TextResponse):
             return TextResult(text=parsed.text)
+
+        if isinstance(parsed, QueryResponse):
+            return QueryParamsResult(params=_to_query_params(parsed.params))
 
         return EventListResult(ids=parsed.ids)

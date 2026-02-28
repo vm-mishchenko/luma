@@ -128,6 +128,28 @@ def _build_query_params(args: argparse.Namespace) -> QueryParams:
     )
 
 
+_PARAM_TO_FLAG = {
+    "days": "--days",
+    "from_date": "--from-date",
+    "to_date": "--to-date",
+    "min_guest": "--min-guest",
+    "max_guest": "--max-guest",
+    "min_time": "--min-time",
+    "max_time": "--max-time",
+    "day": "--day",
+    "sort": "--sort",
+}
+
+
+def _params_to_cli_flags(params: QueryParams) -> str:
+    parts = []
+    for field, flag in _PARAM_TO_FLAG.items():
+        value = getattr(params, field, None)
+        if value is not None:
+            parts.append(f"{flag} {value}")
+    return " ".join(parts)
+
+
 def _print_events(
     events: list[Event],
     *,
@@ -244,13 +266,13 @@ def _query(
             _save_seen_urls(new_seen, cache_dir)
         return 0
 
-    top_n = result.events[: args.top]
-    _print_events(top_n, sort=args.sort, show_all=args.show_all, seen_urls=seen_urls)
+    display = result.events[: args.top] if args.top else result.events
+    _print_events(display, sort=args.sort, show_all=args.show_all, seen_urls=seen_urls)
 
     if args.discard:
-        new_seen = seen_urls | {e.url for e in top_n}
+        new_seen = seen_urls | {e.url for e in display}
         _save_seen_urls(new_seen, cache_dir)
-        print(f"Marked {len(top_n)} events as seen.", file=sys.stderr)
+        print(f"Marked {len(display)} events as seen.", file=sys.stderr)
 
     return 0
 
@@ -261,6 +283,7 @@ def _agent_query(args: argparse.Namespace, store: EventStore) -> int:
         AgentError,
         EventListResult,
         FinalResult,
+        QueryParamsResult,
         TextOutput,
         TextResult,
     )
@@ -287,6 +310,13 @@ def _agent_query(args: argparse.Namespace, store: EventStore) -> int:
                 "events": [e.to_dict() for e in events],
                 "total": len(events),
             }, indent=2))
+        elif isinstance(result, QueryParamsResult):
+            query_result = store.query(result.params)
+            print(json.dumps({
+                "type": "events",
+                "events": [e.to_dict() for e in query_result.events],
+                "total": len(query_result.events),
+            }, indent=2))
         return 0
 
     loader = _Loader()
@@ -304,8 +334,16 @@ def _agent_query(args: argparse.Namespace, store: EventStore) -> int:
                     if debug and len(events) < len(result.ids):
                         missing = len(result.ids) - len(events)
                         print(f"[debug] {missing} event ID(s) not found in store", file=sys.stderr)
+                    display = events[: args.top] if args.top else events
+                    _print_events(display, sort=args.sort)
+                elif isinstance(result, QueryParamsResult):
+                    cli_flags = _params_to_cli_flags(result.params)
+                    print(f"{_DIM}luma {cli_flags}{_RESET}", file=sys.stderr)
+                    query_result = store.query(result.params)
+                    display = query_result.events[: args.top] if args.top else query_result.events
                     _print_events(
-                        events[: args.top], sort=args.sort
+                        display,
+                        sort=result.params.sort or args.sort,
                     )
     except AgentError as exc:
         loader.stop()
