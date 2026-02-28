@@ -27,16 +27,24 @@ from luma.config import (
     PAGINATION_LIMIT,
     REQUEST_DELAY_SEC,
 )
-from luma.models import Event, generate_event_id
+from luma.models import Event, Host
 
 
 @dataclass
 class _EventRecord:
+    api_id: str
     title: str
     url: str
     start_at: str
     guest_count: int
     source: str
+    location_type: str | None
+    latitude: float | None
+    longitude: float | None
+    city: str | None
+    region: str | None
+    country: str | None
+    hosts: list[dict[str, Any]]
 
 
 def _parse_iso8601_utc(value: str) -> datetime:
@@ -147,18 +155,39 @@ def _resolve_source_for_calendar_url(
 
 def _event_from_entry(entry: dict[str, Any], source: str) -> _EventRecord | None:
     event = entry.get("event", {})
+    api_id = event.get("api_id")
     title = (event.get("name") or "").strip()
     slug = event.get("url")
     start_at = event.get("start_at")
-    if not title or not slug or not start_at:
+    if not api_id or not title or not slug or not start_at:
         return None
+
     guest_count = int(entry.get("guest_count") or 0)
+
+    coordinate = event.get("coordinate") or {}
+    geo = event.get("geo_address_info") or {}
+
+    raw_hosts = entry.get("hosts") or []
+    hosts = [
+        {"name": h["name"].strip(), "linkedin_handle": h.get("linkedin_handle"), "youtube_handle": h.get("youtube_handle")}
+        for h in raw_hosts
+        if (h.get("name") or "").strip()
+    ]
+
     return _EventRecord(
+        api_id=api_id,
         title=title,
         url=f"https://luma.com/{slug}",
         start_at=start_at,
         guest_count=guest_count,
         source=source,
+        location_type=event.get("location_type"),
+        latitude=coordinate.get("latitude"),
+        longitude=coordinate.get("longitude"),
+        city=geo.get("city"),
+        region=geo.get("region"),
+        country=geo.get("country"),
+        hosts=hosts,
     )
 
 
@@ -263,11 +292,19 @@ def _dedupe_by_url(records: list[_EventRecord]) -> list[Event]:
     for rec in records:
         if rec.url not in merged:
             merged[rec.url] = {
+                "api_id": rec.api_id,
                 "title": rec.title,
                 "url": rec.url,
                 "start_at": rec.start_at,
                 "guest_count": rec.guest_count,
                 "sources": {rec.source},
+                "location_type": rec.location_type,
+                "latitude": rec.latitude,
+                "longitude": rec.longitude,
+                "city": rec.city,
+                "region": rec.region,
+                "country": rec.country,
+                "hosts": rec.hosts,
             }
             continue
 
@@ -281,19 +318,20 @@ def _dedupe_by_url(records: list[_EventRecord]) -> list[Event]:
     events: list[Event] = []
     for item in merged.values():
         events.append(Event(
-            id=generate_event_id(item["url"]),
+            id=item["api_id"],
             title=item["title"],
             url=item["url"],
             start_at=item["start_at"],
             guest_count=item["guest_count"],
             sources=sorted(item["sources"]),
+            location_type=item["location_type"],
+            latitude=item["latitude"],
+            longitude=item["longitude"],
+            city=item["city"],
+            region=item["region"],
+            country=item["country"],
+            hosts=[Host.from_dict(h) for h in item["hosts"]],
         ))
-
-    ids = {e.id for e in events}
-    if len(ids) != len(events):
-        raise ValueError(
-            f"Event ID hash collision detected: {len(events)} events but {len(ids)} unique IDs"
-        )
 
     return events
 

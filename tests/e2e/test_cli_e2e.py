@@ -22,7 +22,7 @@ import pytest
 
 import luma.cli as cli
 import luma.config as config
-from luma.models import Event, generate_event_id
+from luma.models import Event
 
 
 # ---------------------------------------------------------------------------
@@ -31,7 +31,7 @@ from luma.models import Event, generate_event_id
 
 SAMPLE_EVENTS = [
     Event(
-        id=generate_event_id("https://luma.com/ai-meetup"),
+        id="evt-test1",
         title="AI Meetup",
         url="https://luma.com/ai-meetup",
         start_at=(datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
@@ -39,7 +39,7 @@ SAMPLE_EVENTS = [
         sources=["category:ai"],
     ),
     Event(
-        id=generate_event_id("https://luma.com/tech-talk"),
+        id="evt-test2",
         title="Tech Talk",
         url="https://luma.com/tech-talk",
         start_at=(datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
@@ -47,7 +47,7 @@ SAMPLE_EVENTS = [
         sources=["category:tech"],
     ),
     Event(
-        id=generate_event_id("https://luma.com/small-event"),
+        id="evt-test3",
         title="Small Event",
         url="https://luma.com/small-event",
         start_at=(datetime.now(timezone.utc) + timedelta(days=3)).isoformat(),
@@ -218,7 +218,7 @@ def test_free_text_event_list_result(tmp_path, capsys):
 
     agent_events = [
         Event(
-            id=generate_event_id("https://luma.com/agent-a"),
+            id="evt-agent-a",
             title="Agent Event A",
             url="https://luma.com/agent-a",
             start_at=(datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
@@ -226,7 +226,7 @@ def test_free_text_event_list_result(tmp_path, capsys):
             sources=["category:test"],
         ),
         Event(
-            id=generate_event_id("https://luma.com/agent-b"),
+            id="evt-agent-b",
             title="Agent Event B",
             url="https://luma.com/agent-b",
             start_at=(datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
@@ -295,7 +295,7 @@ def test_json_agent_events(tmp_path, capsys):
 
     agent_events = [
         Event(
-            id=generate_event_id("https://luma.com/agent-a"),
+            id="evt-agent-a",
             title="Agent Event A",
             url="https://luma.com/agent-a",
             start_at=(datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),

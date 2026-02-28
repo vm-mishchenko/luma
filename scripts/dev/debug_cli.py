@@ -19,7 +19,7 @@ if __name__ == "__main__":
     # Change argv to simulate different CLI invocations.
 
     # Free-text agent query:
-    sys.argv = ["luma", "--debug", "this weekend events, all"]
+    # sys.argv = ["luma", "--debug", "this weekend events, all"]
 
     # Flag-based query:
     # sys.argv = ["luma", "--days", "7", "--min-guest", "100"]
@@ -31,6 +31,6 @@ if __name__ == "__main__":
     # sys.argv = ["luma", "--json", "what's popular this week?"]
 
     # Refresh:
-    # sys.argv = ["luma", "refresh"]
+    sys.argv = ["luma", "refresh"]
 
     raise SystemExit(main())
