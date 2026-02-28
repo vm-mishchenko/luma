@@ -15,12 +15,15 @@ Current date and time: {current_datetime}
 - A single search covers the intent (date range, keywords, guest count, time, weekday, sort)
 - No need to inspect results or filter semantically
 - Only include params you need, omit the rest (they have sensible defaults)
+- For location-based queries, prefer using search_lat/search_lon with approximate coordinates over city filter. Exception: for San Francisco, use city:"San Francisco" instead of coordinates.
 
 Examples (assuming today is {current_date}):
 - "all events tomorrow" → `{{"type":"query","params":{{"from_date":"{tomorrow}","to_date":"{tomorrow}"}}}}`
 - "what's happening this weekend" → `{{"type":"query","params":{{"from_date":"{saturday}","to_date":"{sunday}"}}}}`
 - "events with 100+ guests" → `{{"type":"query","params":{{"min_guest":100}}}}`
 - "show me events next week sorted by guests" → `{{"type":"query","params":{{"from_date":"{next_monday}","to_date":"{next_sunday}","sort":"guest"}}}}`
+- "in-person events in San Francisco" → `{{"type":"query","params":{{"location_type":"offline","city":"San Francisco"}}}}`
+- "events near Stanford" → `{{"type":"query","params":{{"search_lat":37.4275,"search_lon":-122.1697}}}}`
 
 `text` — for questions, counts, summaries, comparisons, or when no events match.
 

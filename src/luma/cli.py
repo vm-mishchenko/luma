@@ -114,6 +114,49 @@ def _add_query_args(parser: argparse.ArgumentParser) -> None:
         help="Only show events whose title matches this glob pattern (case-insensitive, e.g. '*AI*meetup*'). Mutually exclusive with --search/--regex.",
     )
     parser.add_argument(
+        "--city",
+        default=None,
+        help="Filter by city name (case-insensitive exact match).",
+    )
+    parser.add_argument(
+        "--region",
+        default=None,
+        help="Filter by region/state (case-insensitive exact match).",
+    )
+    parser.add_argument(
+        "--country",
+        default=None,
+        help="Filter by country (case-insensitive exact match).",
+    )
+    parser.add_argument(
+        "--location-type",
+        default=None,
+        help="Filter by location type (e.g. 'offline', 'online').",
+    )
+    parser.add_argument(
+        "--sf",
+        action="store_true",
+        help="Shortcut: filter by city 'San Francisco'. Overrides --city.",
+    )
+    parser.add_argument(
+        "--lat",
+        type=float,
+        default=None,
+        help="Latitude of search center for proximity filter. Requires --lon.",
+    )
+    parser.add_argument(
+        "--lon",
+        type=float,
+        default=None,
+        help="Longitude of search center for proximity filter. Requires --lat.",
+    )
+    parser.add_argument(
+        "--radius",
+        type=float,
+        default=None,
+        help="Search radius in miles (default: 5). Requires --lat and --lon.",
+    )
+    parser.add_argument(
         "--discard",
         action="store_true",
         help="Mark all displayed events as seen. Mutually exclusive with --all and --reset.",

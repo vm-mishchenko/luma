@@ -120,6 +120,13 @@ class AgentQueryParams(BaseModel):
     max_time: int | None = Field(None, description="Maximum start hour in LA time (0-23).")
     day: str | None = Field(None, description="Comma-separated weekday filter, e.g. 'Sat,Sun'.")
     sort: Literal["date", "guest"] | None = Field(None, description="Sort by 'date' (default) or 'guest'.")
+    city: str | None = Field(None, description="Filter by city name (case-insensitive exact match). Mutually exclusive with search_lat/search_lon.")
+    region: str | None = Field(None, description="Filter by region/state.")
+    country: str | None = Field(None, description="Filter by country.")
+    location_type: str | None = Field(None, description="Filter by location type: 'offline', 'online'.")
+    search_lat: float | None = Field(None, description="Latitude of search center. Provide approximate coordinates for location-based queries. Requires search_lon. Mutually exclusive with city.")
+    search_lon: float | None = Field(None, description="Longitude of search center. Requires search_lat. Mutually exclusive with city.")
+    search_radius_miles: float | None = Field(None, description="Search radius in miles (default: 5). Requires search_lat and search_lon.")
 
 
 def _to_query_params(agent_params: AgentQueryParams) -> QueryParams:
@@ -133,6 +140,13 @@ def _to_query_params(agent_params: AgentQueryParams) -> QueryParams:
         max_time=agent_params.max_time,
         day=agent_params.day,
         sort=agent_params.sort or DEFAULT_SORT,
+        city=agent_params.city,
+        region=agent_params.region,
+        country=agent_params.country,
+        location_type=agent_params.location_type,
+        search_lat=agent_params.search_lat,
+        search_lon=agent_params.search_lon,
+        search_radius_miles=agent_params.search_radius_miles,
     )
 
 

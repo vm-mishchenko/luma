@@ -110,6 +110,7 @@ def _save_seen_urls(urls: set[str], cache_dir: pathlib.Path) -> None:
 
 
 def _build_query_params(args: argparse.Namespace) -> QueryParams:
+    city = "San Francisco" if args.sf else args.city
     return QueryParams(
         days=args.days,
         from_date=args.from_date,
@@ -125,6 +126,13 @@ def _build_query_params(args: argparse.Namespace) -> QueryParams:
         glob=args.glob,
         sort=args.sort,
         show_all=args.show_all,
+        city=city,
+        region=args.region,
+        country=args.country,
+        location_type=args.location_type,
+        search_lat=args.lat,
+        search_lon=args.lon,
+        search_radius_miles=args.radius,
     )
 
 
@@ -138,6 +146,13 @@ _PARAM_TO_FLAG = {
     "max_time": "--max-time",
     "day": "--day",
     "sort": "--sort",
+    "city": "--city",
+    "region": "--region",
+    "country": "--country",
+    "location_type": "--location-type",
+    "search_lat": "--lat",
+    "search_lon": "--lon",
+    "search_radius_miles": "--radius",
 }
 
 
@@ -146,7 +161,10 @@ def _params_to_cli_flags(params: QueryParams) -> str:
     for field, flag in _PARAM_TO_FLAG.items():
         value = getattr(params, field, None)
         if value is not None:
-            parts.append(f"{flag} {value}")
+            text = str(value)
+            if " " in text:
+                text = f'"{text}"'
+            parts.append(f"{flag} {text}")
     return " ".join(parts)
 
 

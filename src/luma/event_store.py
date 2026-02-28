@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import math
 import pathlib
 import re
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from zoneinfo import ZoneInfo
 
 from luma.config import (
     CACHE_STALE_HOURS,
+    DEFAULT_SEARCH_RADIUS_MILES,
     DEFAULT_SORT,
     DEFAULT_WINDOW_DAYS,
     EVENTS_CACHE_GLOB,
@@ -60,6 +62,13 @@ class QueryParams(BaseModel):
     glob: str | None = Field(None, description="Glob pattern to match event titles (case-insensitive, e.g. '*AI*meetup*'). Mutually exclusive with search and regex.")
     sort: Literal["date", "guest"] = Field(DEFAULT_SORT, description="Sort by event date (default) or guest count.")
     show_all: bool = False
+    city: str | None = Field(None, description="Filter by city name (case-insensitive exact match). Mutually exclusive with search_lat/search_lon.")
+    region: str | None = Field(None, description="Filter by region/state (case-insensitive exact match).")
+    country: str | None = Field(None, description="Filter by country (case-insensitive exact match).")
+    location_type: str | None = Field(None, description="Filter by location type, e.g. 'offline', 'online'.")
+    search_lat: float | None = Field(None, description="Latitude of search center for proximity filter. Requires search_lon. Mutually exclusive with city.")
+    search_lon: float | None = Field(None, description="Longitude of search center for proximity filter. Requires search_lat. Mutually exclusive with city.")
+    search_radius_miles: float | None = Field(None, description="Search radius in miles. Requires search_lat and search_lon.")
 
 
 @dataclass
@@ -87,6 +96,16 @@ def parse_iso8601_utc(value: str) -> datetime:
 def is_on_or_after_min_time(start_at: str, min_hour: int) -> bool:
     dt_la = parse_iso8601_utc(start_at).astimezone(ZoneInfo(TIMEZONE_NAME))
     return dt_la.hour >= min_hour
+
+
+def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    R = 3958.8
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (math.sin(dlat / 2) ** 2
+         + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2))
+         * math.sin(dlon / 2) ** 2)
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +283,19 @@ def _filter_and_sort_events(
             "--days cannot be used together with --from-date/--to-date."
         )
 
+    if params.city and (params.search_lat is not None or params.search_lon is not None):
+        raise QueryValidationError(
+            "--city and coordinate search are mutually exclusive."
+        )
+    if (params.search_lat is None) != (params.search_lon is None):
+        raise QueryValidationError(
+            "Both search_lat and search_lon must be provided together."
+        )
+    if params.search_radius_miles is not None and params.search_lat is None:
+        raise QueryValidationError(
+            "search_radius_miles requires search_lat and search_lon."
+        )
+
     # -- date window ---------------------------------------------------------
 
     la_tz = ZoneInfo(TIMEZONE_NAME)
@@ -360,6 +392,42 @@ def _filter_and_sort_events(
         filtered = [
             item for item in filtered
             if fnmatch.fnmatch(item.title.lower(), glob_pat)
+        ]
+
+    if params.city is not None:
+        city_lower = params.city.lower()
+        filtered = [
+            item for item in filtered
+            if getattr(item, "city", None) is not None
+            and item.city.lower() == city_lower
+        ]
+    if params.region is not None:
+        region_lower = params.region.lower()
+        filtered = [
+            item for item in filtered
+            if getattr(item, "region", None) is not None
+            and item.region.lower() == region_lower
+        ]
+    if params.country is not None:
+        country_lower = params.country.lower()
+        filtered = [
+            item for item in filtered
+            if getattr(item, "country", None) is not None
+            and item.country.lower() == country_lower
+        ]
+    if params.location_type is not None:
+        lt_lower = params.location_type.lower()
+        filtered = [
+            item for item in filtered
+            if getattr(item, "location_type", None) is not None
+            and item.location_type.lower() == lt_lower
+        ]
+    if params.search_lat is not None and params.search_lon is not None:
+        radius = params.search_radius_miles if params.search_radius_miles is not None else DEFAULT_SEARCH_RADIUS_MILES
+        filtered = [
+            item for item in filtered
+            if item.latitude is not None and item.longitude is not None
+            and _haversine_miles(params.search_lat, params.search_lon, item.latitude, item.longitude) <= radius
         ]
 
     # -- sort ----------------------------------------------------------------

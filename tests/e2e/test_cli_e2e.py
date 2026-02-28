@@ -37,6 +37,12 @@ SAMPLE_EVENTS = [
         start_at=(datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
         guest_count=120,
         sources=["category:ai"],
+        city="San Francisco",
+        region="California",
+        country="US",
+        location_type="offline",
+        latitude=37.78,
+        longitude=-122.42,
     ),
     Event(
         id="evt-test2",
@@ -176,6 +182,65 @@ def test_show_all_includes_seen(tmp_path, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "AI Meetup" in out
+
+
+# ---------------------------------------------------------------------------
+# Location filter tests
+# ---------------------------------------------------------------------------
+
+
+def test_city_filter(tmp_path, capsys):
+    _write_cache(tmp_path)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--city", "San Francisco"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "AI Meetup" in out
+    assert "Tech Talk" not in out
+    assert "Small Event" not in out
+
+
+def test_sf_shortcut(tmp_path, capsys):
+    _write_cache(tmp_path)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--sf"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "AI Meetup" in out
+    assert "Tech Talk" not in out
+
+
+def test_sf_overrides_city(tmp_path, capsys):
+    _write_cache(tmp_path)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--sf", "--city", "Oakland"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "AI Meetup" in out
+    assert "Tech Talk" not in out
+
+
+def test_location_type_filter(tmp_path, capsys):
+    _write_cache(tmp_path)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--location-type", "offline"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "AI Meetup" in out
+    assert "Tech Talk" not in out
+
+
+def test_city_case_insensitive(tmp_path, capsys):
+    _write_cache(tmp_path)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--city", "san francisco"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "AI Meetup" in out
+
+
+def test_city_excludes_none(tmp_path, capsys):
+    _write_cache(tmp_path)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--city", "San Francisco"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Tech Talk" not in out
+    assert "Small Event" not in out
 
 
 # ---------------------------------------------------------------------------
