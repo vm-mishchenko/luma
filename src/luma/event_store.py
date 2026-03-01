@@ -114,7 +114,7 @@ def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> floa
 
 class EventProvider(Protocol):
     def load(self) -> list[Event]: ...
-    def save(self, events: list[Event], fetched_at: datetime) -> None: ...
+    def save(self, events: list[Event], fetched_at: datetime) -> pathlib.Path | None: ...
     def check_staleness(self) -> CacheInfo: ...
 
 
@@ -130,7 +130,7 @@ class DiskProvider:
             raise CacheError("No cached events. Run 'luma refresh' first.")
         return self._load_cache(path)
 
-    def save(self, events: list[Event], fetched_at: datetime) -> None:
+    def save(self, events: list[Event], fetched_at: datetime) -> pathlib.Path:
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         stamp = fetched_at.strftime("%Y-%m-%d_%H-%M-%S")
         filename = f"{EVENTS_FILENAME_PREFIX}{stamp}.json"
@@ -141,6 +141,7 @@ class DiskProvider:
         path = self._cache_dir / filename
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
+        return path
 
     def check_staleness(self) -> CacheInfo:
         path = self._find_latest_cache()
@@ -183,6 +184,7 @@ class MemoryProvider:
 
     def save(self, events: list[Event], fetched_at: datetime) -> None:
         self._events = events
+        return None
 
     def check_staleness(self) -> CacheInfo:
         return CacheInfo(is_stale=False, age=timedelta(0))
@@ -216,8 +218,8 @@ class EventStore:
         index = {e.id: e for e in events}
         return [index[eid] for eid in dict.fromkeys(ids) if eid in index]
 
-    def save(self, events: list[Event], fetched_at: datetime) -> None:
-        self._provider.save(events, fetched_at)
+    def save(self, events: list[Event], fetched_at: datetime) -> pathlib.Path | None:
+        return self._provider.save(events, fetched_at)
 
     def check_staleness(self) -> CacheInfo:
         return self._provider.check_staleness()

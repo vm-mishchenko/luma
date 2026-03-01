@@ -155,9 +155,10 @@ def test_retries_on_main_parser_rejected():
     assert rc == 2
 
 
-def test_days_on_refresh_rejected():
-    rc = _run_cli(["refresh", "--days", "7"])
-    assert rc == 2
+def test_days_on_refresh(tmp_path):
+    with mock.patch("luma.refresh.download_events", return_value=[]) as m:
+        _run_cli(["--cache-dir", str(tmp_path), "refresh", "--days", "7"])
+    assert m.call_args.kwargs["end_utc"] - m.call_args.kwargs["start_utc"] == timedelta(days=7)
 
 
 def test_discard_writes_seen(tmp_path, capsys):

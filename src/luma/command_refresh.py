@@ -9,11 +9,12 @@ from luma.event_store import EventStore
 from luma.refresh import refresh
 
 
-def run(retries: int, store: EventStore) -> int:
+def run(retries: int, store: EventStore, *, days: int | None = None) -> int:
     try:
-        count = refresh(retries=retries, store=store)
+        count, path = refresh(retries=retries, store=store, days=days)
     except (urllib.error.URLError, urllib.error.HTTPError, OSError) as err:
         print(f"Error fetching events: {err}", file=sys.stderr)
         return 1
-    print(f"Cached {count} events", file=sys.stderr)
+    location = f" in {path}" if path else ""
+    print(f"Cached {count} events{location}, ready for search", file=sys.stderr)
     return 0

@@ -18,6 +18,7 @@ from luma.config import (
     DEFAULT_CACHE_DIR,
     DEFAULT_RETRIES,
     DEFAULT_SORT,
+    FETCH_WINDOW_DAYS,
 )
 from luma.event_store import DiskProvider, EventStore
 
@@ -291,6 +292,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_RETRIES,
         help=f"Retry attempts for HTTP requests with exponential backoff (default: {DEFAULT_RETRIES}).",
     )
+    refresh_parser.add_argument(
+        "--days",
+        type=int,
+        default=None,
+        help=f"Number of days ahead to fetch events (default: {FETCH_WINDOW_DAYS}).",
+    )
     subparsers.add_parser(
         "chat",
         help="Interactive chat with Luma assistant.",
@@ -310,7 +317,7 @@ def main() -> int:
         print(f"--json is not supported with '{args.command}'.", file=sys.stderr)
         return 2
     if args.command == "refresh":
-        return command_refresh.run(args.retries, store)
+        return command_refresh.run(args.retries, store, days=args.days)
     if args.command == "chat":
         return command_chat.run(store)
     return command_query.run(args, store, cache_dir)
