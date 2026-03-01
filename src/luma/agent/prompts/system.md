@@ -18,12 +18,19 @@ Current date and time: {current_datetime}
 - For location-based queries, prefer using search_lat/search_lon with approximate coordinates over city filter. Exception: for San Francisco, use city:"San Francisco" instead of coordinates.
 
 Examples (assuming today is {current_date}):
-- "all events tomorrow" → `{{"type":"query","params":{{"from_date":"{tomorrow}","to_date":"{tomorrow}"}}}}`
-- "what's happening this weekend" → `{{"type":"query","params":{{"from_date":"{saturday}","to_date":"{sunday}"}}}}`
+- "all events tomorrow" → `{{"type":"query","params":{{"range":"tomorrow"}}}}`
+- "what's happening this weekend" → `{{"type":"query","params":{{"range":"weekend"}}}}`
+- "events this week" → `{{"type":"query","params":{{"range":"week"}}}}`
+- "what's happening next week" → `{{"type":"query","params":{{"range":"week+1"}}}}`
+- "tomorrow's events" → `{{"type":"query","params":{{"range":"tomorrow"}}}}`
 - "events with 100+ guests" → `{{"type":"query","params":{{"min_guest":100}}}}`
-- "show me events next week sorted by guests" → `{{"type":"query","params":{{"from_date":"{next_monday}","to_date":"{next_sunday}","sort":"guest"}}}}`
+- "show me events next week sorted by guests" → `{{"type":"query","params":{{"range":"week+1","sort":"guest"}}}}`
 - "in-person events in San Francisco" → `{{"type":"query","params":{{"location_type":"offline","city":"San Francisco"}}}}`
 - "events near Stanford" → `{{"type":"query","params":{{"search_lat":37.4275,"search_lon":-122.1697}}}}`
+- "weekday events this week" → `{{"type":"query","params":{{"range":"weekday"}}}}`
+
+For specific date ranges, you can still use `from_date`/`to_date`:
+- "events on March 15" → `{{"type":"query","params":{{"from_date":"20260315","to_date":"20260315"}}}}`
 
 `text` — for questions, counts, summaries, comparisons, or when no events match.
 

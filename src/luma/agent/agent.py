@@ -120,6 +120,7 @@ class AgentQueryParams(BaseModel):
     max_time: int | None = Field(None, description="Maximum start hour in LA time (0-23).")
     day: str | None = Field(None, description="Comma-separated weekday filter, e.g. 'Sat,Sun'.")
     sort: Literal["date", "guest"] | None = Field(None, description="Sort by 'date' (default) or 'guest'.")
+    range: str | None = Field(None, description="Predefined date range. Values: today, tomorrow, week[+N], weekday[+N], weekend[+N]. Week is Mon-Sun. Mutually exclusive with days, from_date, to_date.")
     city: str | None = Field(None, description="Filter by city name (case-insensitive exact match). Mutually exclusive with search_lat/search_lon.")
     region: str | None = Field(None, description="Filter by region/state.")
     country: str | None = Field(None, description="Filter by country.")
@@ -140,6 +141,7 @@ def _to_query_params(agent_params: AgentQueryParams) -> QueryParams:
         max_time=agent_params.max_time,
         day=agent_params.day,
         sort=agent_params.sort or DEFAULT_SORT,
+        range=agent_params.range,
         city=agent_params.city,
         region=agent_params.region,
         country=agent_params.country,

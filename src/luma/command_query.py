@@ -133,6 +133,7 @@ def _build_query_params(args: argparse.Namespace) -> QueryParams:
         search_lat=args.lat,
         search_lon=args.lon,
         search_radius_miles=args.radius,
+        range=args.range,
     )
 
 
@@ -153,6 +154,7 @@ _PARAM_TO_FLAG = {
     "search_lat": "--lat",
     "search_lon": "--lon",
     "search_radius_miles": "--radius",
+    "range": "--range",
 }
 
 

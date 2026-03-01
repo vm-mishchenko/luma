@@ -13,7 +13,7 @@ import math
 import pathlib
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field
@@ -66,6 +66,7 @@ class QueryParams(BaseModel):
     region: str | None = Field(None, description="Filter by region/state (case-insensitive exact match).")
     country: str | None = Field(None, description="Filter by country (case-insensitive exact match).")
     location_type: str | None = Field(None, description="Filter by location type, e.g. 'offline', 'online'.")
+    range: str | None = Field(None, description="Predefined date range. Values: today, tomorrow, week[+N], weekday[+N], weekend[+N]. Mutually exclusive with days, from_date, to_date.")
     search_lat: float | None = Field(None, description="Latitude of search center for proximity filter. Requires search_lon. Mutually exclusive with city.")
     search_lon: float | None = Field(None, description="Longitude of search center for proximity filter. Requires search_lat. Mutually exclusive with city.")
     search_radius_miles: float | None = Field(None, description="Search radius in miles. Requires search_lat and search_lon.")
@@ -96,6 +97,82 @@ def parse_iso8601_utc(value: str) -> datetime:
 def is_on_or_after_min_time(start_at: str, min_hour: int) -> bool:
     dt_la = parse_iso8601_utc(start_at).astimezone(ZoneInfo(TIMEZONE_NAME))
     return dt_la.hour >= min_hour
+
+
+def _resolve_range(raw: str, today: date) -> tuple[date, date]:
+    """Parse a range string and return (start_date, end_date) inclusive.
+
+    Uses Monday as week start (weekday 0 = Monday, 6 = Sunday).
+    """
+    raw = raw.strip().lower()
+
+    if raw == "today":
+        return (today, today)
+
+    if raw == "tomorrow":
+        t = today + timedelta(days=1)
+        return (t, t)
+
+    # Parse base+offset pattern for week, weekday, weekend
+    import re
+    m = re.match(r"^(week|weekday|weekend)(?:\+(\d+))?$", raw)
+    if not m:
+        raise QueryValidationError(
+            f"Invalid --range value: '{raw}'. "
+            "Valid values: today, tomorrow, week[+N], weekday[+N], weekend[+N]."
+        )
+
+    base = m.group(1)
+    offset = int(m.group(2)) if m.group(2) is not None else 0
+    wd = today.weekday()  # Mon=0, Sun=6
+
+    if base == "week":
+        if offset == 0:
+            # Remainder of current week: today through Sunday
+            end = today + timedelta(days=(6 - wd))
+            return (today, end)
+        # N-th full week after current: Mon through Sun
+        days_to_next_monday = (7 - wd) % 7 or 7
+        start = today + timedelta(days=days_to_next_monday + 7 * (offset - 1))
+        end = start + timedelta(days=6)
+        return (start, end)
+
+    if base == "weekday":
+        if offset == 0:
+            # Remainder: if Mon-Fri, today..Friday; else next Mon..Fri
+            if wd <= 4:  # Mon-Fri
+                end = today + timedelta(days=(4 - wd))
+                return (today, end)
+            else:
+                next_mon = today + timedelta(days=(7 - wd))
+                return (next_mon, next_mon + timedelta(days=4))
+        # N-th full weekday block after current
+        if wd <= 4:
+            days_to_next_monday = 7 - wd
+        else:
+            days_to_next_monday = (7 - wd)
+        start = today + timedelta(days=days_to_next_monday + 7 * (offset - 1))
+        end = start + timedelta(days=4)
+        return (start, end)
+
+    # base == "weekend"
+    if offset == 0:
+        if wd == 5:  # Saturday
+            return (today, today + timedelta(days=1))
+        if wd == 6:  # Sunday
+            return (today, today)
+        next_sat = today + timedelta(days=(5 - wd))
+        return (next_sat, next_sat + timedelta(days=1))
+    # N-th full weekend after current
+    if wd < 5:  # Mon-Fri: this coming weekend is the "current" one
+        next_sat = today + timedelta(days=(5 - wd))
+    elif wd == 5:
+        next_sat = today + timedelta(days=7)
+    else:  # Sunday
+        next_sat = today + timedelta(days=6)
+    start = next_sat + timedelta(weeks=offset - 1)
+    end = start + timedelta(days=1)
+    return (start, end)
 
 
 def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -285,6 +362,13 @@ def _filter_and_sort_events(
             "--days cannot be used together with --from-date/--to-date."
         )
 
+    if params.range is not None and (
+        params.days is not None or has_date_range
+    ):
+        raise QueryValidationError(
+            "--range cannot be used together with --days, --from-date, or --to-date."
+        )
+
     if params.city and (params.search_lat is not None or params.search_lon is not None):
         raise QueryValidationError(
             "--city and coordinate search are mutually exclusive."
@@ -306,7 +390,21 @@ def _filter_and_sort_events(
         hour=0, minute=0, second=0, microsecond=0
     )
 
-    if has_date_range:
+    if params.range is not None:
+        today_date = today_la.date()
+        range_start, range_end = _resolve_range(params.range, today_date)
+        start_utc = datetime(
+            range_start.year, range_start.month, range_start.day,
+            tzinfo=la_tz,
+        ).astimezone(timezone.utc)
+        end_utc = (
+            datetime(
+                range_end.year, range_end.month, range_end.day,
+                tzinfo=la_tz,
+            )
+            + timedelta(days=1)
+        ).astimezone(timezone.utc)
+    elif has_date_range:
         def _parse_date(raw: str, label: str) -> datetime:
             try:
                 return datetime.strptime(raw, "%Y%m%d").replace(tzinfo=la_tz)

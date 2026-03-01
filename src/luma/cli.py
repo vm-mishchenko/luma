@@ -8,6 +8,7 @@ command module (command_query, command_refresh, command_chat).
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -15,12 +16,21 @@ import luma.command_chat as command_chat
 import luma.command_query as command_query
 import luma.command_refresh as command_refresh
 from luma.config import (
+    ANTHROPIC_API_KEY_ENV,
     DEFAULT_CACHE_DIR,
+    DEFAULT_CONFIG_PATH,
     DEFAULT_RETRIES,
     DEFAULT_SORT,
     FETCH_WINDOW_DAYS,
 )
 from luma.event_store import DiskProvider, EventStore
+from luma.user_config import (
+    ensure_config,
+    get_api_key,
+    get_shortcuts,
+    load_config,
+    validate_config,
+)
 
 
 def _load_env_local() -> None:
@@ -50,6 +60,12 @@ def _add_query_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         metavar="YYYYMMDD",
         help="End date for the event window (inclusive). Mutually exclusive with --days.",
+    )
+    parser.add_argument(
+        "--range",
+        default=None,
+        dest="range",
+        help="Predefined date range: today, tomorrow, week[+N], weekday[+N], weekend[+N].",
     )
     parser.add_argument(
         "--top",
@@ -209,7 +225,7 @@ def _parse_with_query_text(
 
     # Attempt 2: extract trailing positional as free-text query.
     raw = sys.argv[1:] if argv is None else list(argv)
-    if raw and not raw[-1].startswith("-") and raw[-1] not in {"refresh", "chat"}:
+    if raw and not raw[-1].startswith("-") and raw[-1] not in {"refresh", "chat", "sc"}:
         candidate = raw[-1]
         rest = raw[:-1]
         parser.error = _capture_error  # type: ignore[assignment]
@@ -281,6 +297,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Enable debug logging (e.g. agent tool call params).",
     )
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="Override config file path (default: ~/.luma/config.toml).",
+    )
     subparsers = parser.add_subparsers(dest="command")
     refresh_parser = subparsers.add_parser(
         "refresh",
@@ -302,13 +323,126 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "chat",
         help="Interactive chat with Luma assistant.",
     )
+    subparsers.add_parser(
+        "sc",
+        help="Run a named shortcut from config.",
+    )
     _add_query_args(parser)
     return _parse_with_query_text(parser, argv)
 
 
+def _extract_global_flags(argv: list[str]) -> tuple[str | None, str | None]:
+    """Scan *argv* for --config and --cache-dir values without modifying it."""
+    config_path: str | None = None
+    cache_dir: str | None = None
+    for i, arg in enumerate(argv):
+        if arg == "--config" and i + 1 < len(argv):
+            config_path = argv[i + 1]
+        elif arg.startswith("--config="):
+            config_path = arg.split("=", 1)[1]
+        elif arg == "--cache-dir" and i + 1 < len(argv):
+            cache_dir = argv[i + 1]
+        elif arg.startswith("--cache-dir="):
+            cache_dir = arg.split("=", 1)[1]
+    return config_path, cache_dir
+
+
+def _resolve_sc(argv: list[str], config: dict, config_path: Path) -> list[str]:
+    """If argv contains ``sc`` as the subcommand, resolve the shortcut."""
+    # Find the subcommand position (first non-flag positional)
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--":
+            break
+        if arg.startswith("-"):
+            # Skip flags that consume a value
+            if arg in ("--config", "--cache-dir") or (
+                not arg.startswith("--") and len(arg) == 2
+            ):
+                i += 2
+                continue
+            if "=" in arg:
+                i += 1
+                continue
+            # Boolean flags (--json, --debug, etc.)
+            i += 1
+            continue
+        # First positional: check if it's "sc"
+        if arg == "sc":
+            break
+        return list(argv)
+        i += 1
+
+    if i >= len(argv) or argv[i] != "sc":
+        return list(argv)
+
+    before_sc = argv[:i]
+    after_sc = argv[i + 1:]
+    shortcuts = get_shortcuts(config)
+
+    # No name follows sc, or next arg is a flag → list shortcuts
+    if not after_sc or after_sc[0].startswith("-"):
+        if shortcuts:
+            print("Available shortcuts:")
+            for name, args in sorted(shortcuts.items()):
+                print(f"  {name}: {' '.join(args)}")
+        else:
+            print("No shortcuts defined.")
+        print(f"\nAdd shortcuts to {config_path}:")
+        print('  [shortcuts]')
+        print('  popular = ["--sort", "guest", "--min-guest", "100"]')
+        print('  weekend = ["--range", "weekend"]')
+        raise SystemExit(0)
+
+    name = after_sc[0]
+    extra = after_sc[1:]
+
+    if name not in shortcuts:
+        available = ", ".join(sorted(shortcuts)) if shortcuts else "(none)"
+        print(
+            f"Error: unknown shortcut '{name}'. Available: {available}",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+    resolved = before_sc + shortcuts[name] + extra
+    clean = []
+    skip_next = False
+    for a in resolved:
+        if skip_next:
+            skip_next = False
+            continue
+        if a in ("--config", "--cache-dir"):
+            skip_next = True
+            continue
+        if a.startswith("--config=") or a.startswith("--cache-dir="):
+            continue
+        clean.append(a)
+    _dim = "\033[2m" if sys.stderr.isatty() else ""
+    _reset = "\033[0m" if sys.stderr.isatty() else ""
+    print(f"{_dim}luma {' '.join(clean)}{_reset}", file=sys.stderr)
+    return resolved
+
+
 def main() -> int:
     _load_env_local()
-    args = parse_args()
+    raw_argv = sys.argv[1:]
+
+    config_path_str, cache_dir_override = _extract_global_flags(raw_argv)
+
+    config_path = Path(config_path_str) if config_path_str else DEFAULT_CONFIG_PATH
+    ensure_config(config_path)
+    config = load_config(config_path)
+    validate_config(config)
+
+    api_key = get_api_key(config)
+    if api_key and not os.environ.get(ANTHROPIC_API_KEY_ENV):
+        os.environ[ANTHROPIC_API_KEY_ENV] = api_key
+
+    argv = _resolve_sc(raw_argv, config, config_path)
+
+    args = parse_args(argv)
     cache_dir = (
         Path(args.cache_dir).expanduser() if args.cache_dir else DEFAULT_CACHE_DIR
     )

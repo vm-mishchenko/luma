@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import pathlib
 
-DEFAULT_CACHE_DIR = pathlib.Path.home() / ".cache" / "luma"
+DEFAULT_LUMA_DIR = pathlib.Path.home() / ".luma"
+DEFAULT_CACHE_DIR = DEFAULT_LUMA_DIR / "events"
+DEFAULT_CONFIG_PATH = DEFAULT_LUMA_DIR / "config.toml"
 
 DEFAULT_WINDOW_DAYS = 14
 CACHE_STALE_HOURS = 12

@@ -14,6 +14,7 @@ Skipped white-box assertions (not externally observable via CLI):
 from __future__ import annotations
 
 import json
+import pathlib
 import sys
 from datetime import datetime, timedelta, timezone
 from unittest import mock
@@ -79,6 +80,13 @@ def _write_cache(tmp_path, events=None, fetched_at=None):
     return path
 
 
+def _write_config(tmp_path, content: str = "") -> pathlib.Path:
+    """Write a TOML config string to a temp file and return the path."""
+    path = tmp_path / "config.toml"
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
 def _run_cli(argv):
     """Run CLI with given argv list, return exit code."""
     with mock.patch.object(sys, "argv", ["luma"] + list(argv)):
@@ -93,9 +101,11 @@ def _run_cli(argv):
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
-def _reset_config():
-    """Ensure config overrides do not leak between tests."""
-    yield
+def _isolate_config(tmp_path):
+    """Prevent tests from writing to the real ~/.luma/ directory."""
+    isolated = tmp_path / "default-config.toml"
+    with mock.patch.object(cli, "DEFAULT_CONFIG_PATH", isolated):
+        yield
     config._reset()
 
 
@@ -417,3 +427,213 @@ def test_json_no_cache_empty_stdout(tmp_path, capsys):
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "No cached events" in captured.err
+
+
+# ---------------------------------------------------------------------------
+# Config loading tests
+# ---------------------------------------------------------------------------
+
+
+def test_no_config_auto_creates(tmp_path, capsys):
+    cfg = tmp_path / "auto" / "config.toml"
+    assert not cfg.exists()
+    _write_cache(tmp_path)
+    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path)])
+    assert rc == 0
+    assert cfg.is_file()
+    content = cfg.read_text(encoding="utf-8")
+    assert "api_key" in content
+
+
+def test_valid_config_loads(tmp_path, capsys):
+    cfg = _write_config(tmp_path, 'api_key = "sk-test-123"\n')
+    _write_cache(tmp_path)
+    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path)])
+    assert rc == 0
+
+
+def test_malformed_toml_exits_2(tmp_path, capsys):
+    cfg = _write_config(tmp_path, "[invalid toml\n")
+    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path)])
+    assert rc == 2
+    assert "malformed" in capsys.readouterr().err.lower()
+
+
+# ---------------------------------------------------------------------------
+# Shortcut tests
+# ---------------------------------------------------------------------------
+
+
+def test_sc_runs_shortcut(tmp_path, capsys):
+    cfg = _write_config(
+        tmp_path,
+        '[shortcuts]\npopular = ["--sort", "guest", "--min-guest", "100"]\n',
+    )
+    _write_cache(tmp_path)
+    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "sc", "popular"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "AI Meetup" in out
+    assert "Small Event" not in out
+
+
+def test_sc_override_with_cli(tmp_path, capsys):
+    cfg = _write_config(
+        tmp_path,
+        '[shortcuts]\nby-guest = ["--sort", "guest"]\n',
+    )
+    _write_cache(tmp_path)
+    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "sc", "by-guest", "--top", "1"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Top 1 events" in out
+
+
+def test_sc_list_shortcuts(tmp_path, capsys):
+    cfg = _write_config(
+        tmp_path,
+        '[shortcuts]\npopular = ["--sort", "guest"]\nweekend = ["--range", "weekend"]\n',
+    )
+    rc = _run_cli(["--config", str(cfg), "sc"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "popular" in out
+    assert "weekend" in out
+    assert "Add shortcuts to" in out
+    assert "[shortcuts]" in out
+
+
+def test_sc_unknown_name(tmp_path, capsys):
+    cfg = _write_config(
+        tmp_path,
+        '[shortcuts]\npopular = ["--sort", "guest"]\n',
+    )
+    rc = _run_cli(["--config", str(cfg), "sc", "nonexistent"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "nonexistent" in err
+    assert "popular" in err
+
+
+def test_sc_no_config(tmp_path, capsys):
+    cfg = tmp_path / "new" / "config.toml"
+    assert not cfg.exists()
+    rc = _run_cli(["--config", str(cfg), "sc", "foo"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "foo" in err
+    assert cfg.is_file()
+
+
+# ---------------------------------------------------------------------------
+# Range tests
+# ---------------------------------------------------------------------------
+
+
+def _make_events_at_offsets(*day_offsets):
+    """Create events at given day offsets from today noon LA time."""
+    from zoneinfo import ZoneInfo
+    la_tz = ZoneInfo("America/Los_Angeles")
+    now_la = datetime.now(la_tz)
+    base = now_la.replace(hour=12, minute=0, second=0, microsecond=0)
+    events = []
+    for i, offset in enumerate(day_offsets):
+        start = (base + timedelta(days=offset)).astimezone(timezone.utc)
+        events.append(
+            Event(
+                id=f"evt-r{i}",
+                title=f"Event Day+{offset}",
+                url=f"https://luma.com/evt-r{i}",
+                start_at=start.isoformat(),
+                guest_count=50 + i * 10,
+                sources=["category:test"],
+            )
+        )
+    return events
+
+
+def test_range_today(tmp_path, capsys):
+    events = _make_events_at_offsets(0, 1, 2)
+    _write_cache(tmp_path, events=events)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--range", "today"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Event Day+0" in out
+    assert "Event Day+1" not in out
+
+
+def test_range_tomorrow(tmp_path, capsys):
+    events = _make_events_at_offsets(0, 1, 2)
+    _write_cache(tmp_path, events=events)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--range", "tomorrow"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Event Day+1" in out
+    assert "Event Day+0" not in out
+    assert "Event Day+2" not in out
+
+
+def test_range_week(tmp_path, capsys):
+    events = _make_events_at_offsets(0, 1, 2, 3, 4, 5, 6, 7, 8)
+    _write_cache(tmp_path, events=events)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--range", "week"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Event Day+0" in out
+    # Events beyond this week's Sunday should not appear
+    from datetime import date
+    today = date.today()
+    days_to_sunday = 6 - today.weekday()
+    for offset in range(8, 9):
+        if offset > days_to_sunday:
+            assert f"Event Day+{offset}" not in out
+
+
+def test_range_week_plus_1(tmp_path, capsys):
+    events = _make_events_at_offsets(*range(0, 21))
+    _write_cache(tmp_path, events=events)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--range", "week+1"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    from datetime import date
+    today = date.today()
+    wd = today.weekday()
+    days_to_next_monday = (7 - wd) % 7 or 7
+    for d in range(days_to_next_monday, days_to_next_monday + 7):
+        assert f"Event Day+{d}" in out
+    assert "Event Day+0" not in out
+
+
+def test_range_weekday(tmp_path, capsys):
+    events = _make_events_at_offsets(*range(0, 10))
+    _write_cache(tmp_path, events=events)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--range", "weekday"])
+    assert rc == 0
+
+
+def test_range_weekend(tmp_path, capsys):
+    events = _make_events_at_offsets(*range(0, 10))
+    _write_cache(tmp_path, events=events)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--range", "weekend"])
+    assert rc == 0
+
+
+def test_range_weekend_plus_1(tmp_path, capsys):
+    events = _make_events_at_offsets(*range(0, 20))
+    _write_cache(tmp_path, events=events)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--range", "weekend+1"])
+    assert rc == 0
+
+
+def test_range_with_days_error(tmp_path, capsys):
+    _write_cache(tmp_path)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--range", "week", "--days", "7"])
+    assert rc == 2
+    err = capsys.readouterr().err.lower()
+    assert "cannot be used" in err
+
+
+def test_range_invalid(tmp_path, capsys):
+    _write_cache(tmp_path)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--range", "foobar"])
+    assert rc == 2
