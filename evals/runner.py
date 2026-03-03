@@ -7,7 +7,14 @@ import importlib.util
 import sys
 from pathlib import Path
 
-from luma.agent import Agent, AgentResult
+from luma.agent import (
+    ALL_TOOLS,
+    Agent,
+    AgentResult,
+    build_system_prompt,
+    build_user_message,
+    parse_agent_response,
+)
 from luma.event_store import EventStore, MemoryProvider
 from luma.preference_store import MemoryPreferenceProvider, PreferenceStore
 
@@ -48,11 +55,20 @@ def _load_dataset(name: str):
 
 
 def _make_task():
+    system_prompt = build_system_prompt()
+
     def task(inp: QueryInput) -> AgentResult:
         store = EventStore(MemoryProvider(events=inp.events))
         preferences = PreferenceStore(MemoryPreferenceProvider())
-        agent = Agent(store=store, preferences=preferences)
-        return agent.query(inp.prompt, inp.params)
+        user_message = build_user_message(inp.prompt, inp.params)
+        agent = Agent(
+            store=store,
+            preferences=preferences,
+            system_prompt=system_prompt,
+            tools=ALL_TOOLS,
+            expected_output=parse_agent_response,
+        )
+        return agent.query(user_message)
 
     return task
 

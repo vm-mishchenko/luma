@@ -825,23 +825,26 @@ def test_suggest_no_likes(tmp_path, capsys, monkeypatch):
 
 
 def test_suggest_success(tmp_path, capsys, monkeypatch):
+    from luma.agent import EventListResult, FinalResult
+
     _write_cache(tmp_path)
     luma_dir = tmp_path / "luma"
     _write_preferences(luma_dir, "liked.json", [SAMPLE_EVENTS[0]])
     monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
     monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
-    monkeypatch.setattr(
-        "luma.ranker.rank",
-        lambda liked, disliked, candidates, **kw: [SAMPLE_EVENTS[1].id],
-    )
+
+    def _fake_query_iter(self, text, *, loader=None):
+        yield FinalResult(result=EventListResult(ids=[SAMPLE_EVENTS[1].id]))
+
+    monkeypatch.setattr("luma.agent.Agent.query_iter", _fake_query_iter)
     rc = _run_cli(["--cache-dir", str(tmp_path), "suggest"])
     assert rc == 0
     out = capsys.readouterr().out
     assert "Tech Talk" in out
 
 
-def test_suggest_ranker_error(tmp_path, capsys, monkeypatch):
-    from luma.ranker import RankerError
+def test_suggest_agent_error(tmp_path, capsys, monkeypatch):
+    from luma.agent import AgentError
 
     _write_cache(tmp_path)
     luma_dir = tmp_path / "luma"
@@ -849,10 +852,10 @@ def test_suggest_ranker_error(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
     monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
 
-    def _raise_error(*args, **kwargs):
-        raise RankerError("API failed")
+    def _raise_error(self, text, *, loader=None):
+        raise AgentError("API failed")
 
-    monkeypatch.setattr("luma.ranker.rank", _raise_error)
+    monkeypatch.setattr("luma.agent.Agent.query_iter", _raise_error)
     rc = _run_cli(["--cache-dir", str(tmp_path), "suggest"])
     assert rc == 1
     assert "API failed" in capsys.readouterr().err

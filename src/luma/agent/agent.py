@@ -8,10 +8,10 @@ import pathlib
 import re
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Annotated, Any, Literal, Protocol, Union
 
 import anthropic
@@ -208,11 +208,68 @@ _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
 # ---------------------------------------------------------------------------
+# Prompt & response helpers (used by callers to configure the Agent)
+# ---------------------------------------------------------------------------
+
+def build_system_prompt() -> str:
+    """Build the default system prompt for the query/chat agent."""
+    template = (_PROMPTS_DIR / "system.md").read_text(encoding="utf-8")
+    now = datetime.now(ZoneInfo(TIMEZONE_NAME))
+    current_datetime = now.strftime("%A, %B %d, %Y, %I:%M %p %Z")
+    current_date = now.strftime("%Y%m%d")
+    response_schema = json.dumps(RESPONSE_ADAPTER.json_schema(), indent=2)
+
+    tomorrow = now + timedelta(days=1)
+    days_until_saturday = (5 - now.weekday()) % 7 or 7
+    saturday = now + timedelta(days=days_until_saturday)
+    sunday = saturday + timedelta(days=1)
+    next_monday = saturday + timedelta(days=2)
+    next_sunday = next_monday + timedelta(days=6)
+    fmt = "%Y%m%d"
+
+    return template.format(
+        current_datetime=current_datetime,
+        current_date=current_date,
+        response_schema=response_schema,
+        tomorrow=tomorrow.strftime(fmt),
+        saturday=saturday.strftime(fmt),
+        sunday=sunday.strftime(fmt),
+        next_monday=next_monday.strftime(fmt),
+        next_sunday=next_sunday.strftime(fmt),
+    )
+
+
+def build_user_message(text: str, params: QueryParams) -> str:
+    """Build the user message, appending query params when present."""
+    params_dict = params.model_dump(exclude_none=True)
+    if params_dict:
+        params_str = json.dumps(params_dict, indent=2)
+        return f"{text}\n\nUser-provided filters:\n{params_str}"
+    return text
+
+
+def parse_agent_response(data: Any) -> AgentResult:
+    """Validate and map LLM JSON to AgentResult using the default response schema."""
+    try:
+        parsed = RESPONSE_ADAPTER.validate_python(data)
+    except ValidationError as exc:
+        raise AgentError(
+            f"Agent response does not match schema: {exc}"
+        ) from exc
+
+    if isinstance(parsed, TextResponse):
+        return TextResult(text=parsed.text)
+    if isinstance(parsed, QueryResponse):
+        return QueryParamsResult(params=_to_query_params(parsed.params))
+    return EventListResult(ids=parsed.ids)
+
+
+# ---------------------------------------------------------------------------
 # Agent
 # ---------------------------------------------------------------------------
 
 class Agent:
-    """LLM-powered agent that queries events."""
+    """Generic LLM executor with optional tool-calling loop."""
 
     RESPONSE = "I'm Luma assistant. I can help you find events."
 
@@ -221,12 +278,18 @@ class Agent:
         store: EventStore,
         preferences: PreferenceStore,
         *,
+        system_prompt: str,
+        tools: list[dict[str, Any]] | None,
+        expected_output: Callable[[Any], AgentResult],
         model: str = DEFAULT_AGENT_MODEL,
         max_iterations: int = DEFAULT_AGENT_MAX_ITERATIONS,
         debug: bool = False,
     ) -> None:
         self._store = store
         self._preferences = preferences
+        self._system_prompt = system_prompt
+        self._tools = tools or None
+        self._expected_output = expected_output
         self._model = model
         self._max_iterations = max_iterations
         self._debug = debug
@@ -239,7 +302,6 @@ class Agent:
     def query_iter(
         self,
         text: str,
-        params: QueryParams,
         *,
         loader: _Loader | None = None,
     ) -> Iterator[AgentOutput]:
@@ -252,9 +314,7 @@ class Agent:
             )
 
         client = anthropic.Anthropic(api_key=api_key)
-        system_prompt = self._build_system_prompt()
-        user_message = self._build_user_message(text, params)
-        messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
+        messages: list[dict[str, Any]] = [{"role": "user", "content": text}]
 
         for _ in range(self._max_iterations):
             if loader and not self._debug:
@@ -267,12 +327,11 @@ class Agent:
                     )
                     print(
                         f"[debug] Start LLM call: {len(messages)} messages"
-                        f"(system={len(system_prompt)}, messages={msg_chars})",
+                        f"(system={len(self._system_prompt)}, messages={msg_chars})",
                         file=sys.stderr,
                     )
                 response = self._create_llm_response(
                     client=client,
-                    system_prompt=system_prompt,
                     messages=messages,
                 )
                 if self._debug:
@@ -289,17 +348,28 @@ class Agent:
                 if loader:
                     loader.stop()
 
-            # Yield text blocks from this turn (before tool_use)
             turn_text = "".join(
                 block.text
                 for block in response.content
                 if hasattr(block, "text")
             )
-            # Skip TextOutput for final turn; caller prints intro + formatted events
-            if turn_text.strip() and response.stop_reason != "end_turn":
-                yield TextOutput(text=turn_text.strip())
+
+            if response.stop_reason == "end_turn":
+                result = self._parse_response(turn_text)
+                if self._debug:
+                    label = type(result).__name__
+                    if isinstance(result, QueryParamsResult):
+                        label += f" {result.params.model_dump(exclude_none=True)}"
+                    print(f"[debug] response type: {label}", file=sys.stderr)
+                yield FinalResult(result=result)
+                return
 
             if response.stop_reason == "tool_use":
+                if not self._tools:
+                    raise AgentError(
+                        "LLM requested tool use but no tools are configured"
+                    )
+
                 tool_use_blocks = [
                     block for block in response.content
                     if block.type == "tool_use"
@@ -307,6 +377,10 @@ class Agent:
                 if self._debug:
                     for b in tool_use_blocks:
                         print(f"[debug] tool call: {b.name} {b.input}", file=sys.stderr)
+
+                if turn_text.strip():
+                    yield TextOutput(text=turn_text.strip())
+
                 query_count = sum(1 for b in tool_use_blocks if b.name == "query_events")
                 pref_names = [b.name for b in tool_use_blocks if b.name in ("get_liked_events", "get_disliked_events")]
                 parts: list[str] = []
@@ -320,6 +394,7 @@ class Agent:
                     parts.append("Loading disliked events")
                 if parts:
                     yield TextOutput(text=f"{', '.join(parts)}...")
+
                 tool_results = []
                 for batch_start in range(
                     0, len(tool_use_blocks), AGENT_MAX_PARALLEL_TOOLS
@@ -363,24 +438,14 @@ class Agent:
                 messages.append({"role": "user", "content": tool_results})
                 continue
 
-            if response.stop_reason == "end_turn":
-                result = self._parse_response(turn_text)
-                if self._debug:
-                    label = type(result).__name__
-                    if isinstance(result, QueryParamsResult):
-                        label += f" {result.params.model_dump(exclude_none=True)}"
-                    print(f"[debug] response type: {label}", file=sys.stderr)
-                yield FinalResult(result=result)
-                return
-
         raise AgentError(
             f"Agent exceeded maximum iterations ({self._max_iterations})"
         )
 
-    def query(self, text: str, params: QueryParams) -> AgentResult:
-        """Backward-compatible: consume query_iter and return the last FinalResult."""
+    def query(self, text: str) -> AgentResult:
+        """Consume query_iter and return the final result."""
         last_result: AgentResult | None = None
-        for item in self.query_iter(text, params):
+        for item in self.query_iter(text):
             if isinstance(item, FinalResult):
                 last_result = item.result
         if last_result is None:
@@ -389,58 +454,22 @@ class Agent:
 
     # -- private ------------------------------------------------------------
 
-    def _build_system_prompt(self) -> str:
-        template = (_PROMPTS_DIR / "system.md").read_text(encoding="utf-8")
-        now = datetime.now(ZoneInfo(TIMEZONE_NAME))
-        current_datetime = now.strftime("%A, %B %d, %Y, %I:%M %p %Z")
-        current_date = now.strftime("%Y%m%d")
-        response_schema = json.dumps(
-            RESPONSE_ADAPTER.json_schema(), indent=2
-        )
-
-        from datetime import timedelta
-        tomorrow = now + timedelta(days=1)
-        days_until_saturday = (5 - now.weekday()) % 7 or 7
-        saturday = now + timedelta(days=days_until_saturday)
-        sunday = saturday + timedelta(days=1)
-        next_monday = saturday + timedelta(days=2)
-        next_sunday = next_monday + timedelta(days=6)
-        fmt = "%Y%m%d"
-
-        return template.format(
-            current_datetime=current_datetime,
-            current_date=current_date,
-            response_schema=response_schema,
-            tomorrow=tomorrow.strftime(fmt),
-            saturday=saturday.strftime(fmt),
-            sunday=sunday.strftime(fmt),
-            next_monday=next_monday.strftime(fmt),
-            next_sunday=next_sunday.strftime(fmt),
-        )
-
-    def _build_user_message(self, text: str, params: QueryParams) -> str:
-        params_dict = params.model_dump(exclude_none=True)
-        if params_dict:
-            params_str = json.dumps(params_dict, indent=2)
-            return f"{text}\n\nUser-provided filters:\n{params_str}"
-        return text
-
     def _create_llm_response(
         self,
         *,
         client: anthropic.Anthropic,
-        system_prompt: str,
         messages: list[dict[str, Any]],
     ) -> Any:
+        kwargs: dict[str, Any] = dict(
+            model=self._model,
+            max_tokens=AGENT_MAX_TOKENS,
+            system=self._system_prompt,
+            messages=messages,
+        )
+        if self._tools:
+            kwargs["tools"] = self._tools
         with ThreadPoolExecutor(max_workers=1) as ex:
-            future = ex.submit(
-                client.messages.create,
-                model=self._model,
-                max_tokens=AGENT_MAX_TOKENS,
-                system=system_prompt,
-                messages=messages,
-                tools=ALL_TOOLS,
-            )
+            future = ex.submit(client.messages.create, **kwargs)
             try:
                 return future.result(timeout=AGENT_LLM_TIMEOUT_SECONDS)
             except FuturesTimeoutError as exc:
@@ -476,7 +505,6 @@ class Agent:
     def _parse_response(self, text: str) -> AgentResult:
         cleaned = text.strip()
 
-        # Try full text first, then fenced block, then first JSON object.
         candidates = [cleaned]
         fence_match = _MARKDOWN_FENCE_RE.search(cleaned)
         if fence_match:
@@ -500,16 +528,10 @@ class Agent:
             ) from last_exc
 
         try:
-            parsed = RESPONSE_ADAPTER.validate_python(data)
-        except ValidationError as exc:
+            return self._expected_output(data)
+        except AgentError:
+            raise
+        except Exception as exc:
             raise AgentError(
                 f"Agent response does not match schema: {exc}"
             ) from exc
-
-        if isinstance(parsed, TextResponse):
-            return TextResult(text=parsed.text)
-
-        if isinstance(parsed, QueryResponse):
-            return QueryParamsResult(params=_to_query_params(parsed.params))
-
-        return EventListResult(ids=parsed.ids)

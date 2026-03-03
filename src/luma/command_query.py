@@ -303,6 +303,7 @@ def _query(
 
 def _agent_query(args: argparse.Namespace, store: EventStore, preferences: "PreferenceStore") -> int:
     from luma.agent import (
+        ALL_TOOLS,
         Agent,
         AgentError,
         EventListResult,
@@ -310,15 +311,27 @@ def _agent_query(args: argparse.Namespace, store: EventStore, preferences: "Pref
         QueryParamsResult,
         TextOutput,
         TextResult,
+        build_system_prompt,
+        build_user_message,
+        parse_agent_response,
     )
 
     debug = getattr(args, "debug", False)
     params = _build_query_params(args)
-    agent = Agent(store=store, preferences=preferences, debug=debug)
+    system_prompt = build_system_prompt()
+    user_message = build_user_message(args.query_text, params)
+    agent = Agent(
+        store=store,
+        preferences=preferences,
+        system_prompt=system_prompt,
+        tools=ALL_TOOLS,
+        expected_output=parse_agent_response,
+        debug=debug,
+    )
 
     if args.json_output:
         try:
-            result = agent.query(args.query_text, params)
+            result = agent.query(user_message)
         except AgentError as exc:
             print(f"Agent error: {exc}", file=sys.stderr)
             return 1
@@ -345,7 +358,7 @@ def _agent_query(args: argparse.Namespace, store: EventStore, preferences: "Pref
 
     loader = _Loader()
     try:
-        for item in agent.query_iter(args.query_text, params, loader=loader):
+        for item in agent.query_iter(user_message, loader=loader):
             if isinstance(item, TextOutput):
                 print(f"{_DIM}{item.text}{_RESET}", file=sys.stderr)
             elif isinstance(item, FinalResult):
