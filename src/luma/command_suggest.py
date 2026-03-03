@@ -136,10 +136,8 @@ def run(store: EventStore, preferences: PreferenceStore, *, top: int | None = No
     user_message = _build_ranker_message(liked, disliked, candidates, max_results)
 
     agent = Agent(
-        store=store,
-        preferences=preferences,
         system_prompt=system_prompt,
-        tools=None,
+        tools=[],
         expected_output=_parse_ranker_response,
     )
 

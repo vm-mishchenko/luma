@@ -8,11 +8,11 @@ import threading
 import time
 
 from luma.agent import (
-    ALL_TOOLS,
     Agent,
     build_system_prompt,
     parse_agent_response,
 )
+from luma.agent.tools import GetDislikedEventsTool, GetLikedEventsTool, QueryEventsTool
 from luma.event_store import EventStore
 from luma.preference_store import PreferenceStore
 
@@ -52,11 +52,10 @@ class _Spinner:
 def run(store: EventStore, preferences: PreferenceStore) -> int:
     print("luma chat (Ctrl+D to exit)")
     system_prompt = build_system_prompt()
+    tools = [QueryEventsTool(store), GetLikedEventsTool(preferences), GetDislikedEventsTool(preferences)]
     agent = Agent(
-        store=store,
-        preferences=preferences,
         system_prompt=system_prompt,
-        tools=ALL_TOOLS,
+        tools=tools,
         expected_output=parse_agent_response,
     )
     history: list[dict[str, str]] = []

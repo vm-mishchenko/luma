@@ -303,7 +303,6 @@ def _query(
 
 def _agent_query(args: argparse.Namespace, store: EventStore, preferences: "PreferenceStore") -> int:
     from luma.agent import (
-        ALL_TOOLS,
         Agent,
         AgentError,
         EventListResult,
@@ -315,16 +314,16 @@ def _agent_query(args: argparse.Namespace, store: EventStore, preferences: "Pref
         build_user_message,
         parse_agent_response,
     )
+    from luma.agent.tools import GetDislikedEventsTool, GetLikedEventsTool, QueryEventsTool
 
     debug = getattr(args, "debug", False)
     params = _build_query_params(args)
     system_prompt = build_system_prompt()
     user_message = build_user_message(args.query_text, params)
+    tools = [QueryEventsTool(store), GetLikedEventsTool(preferences), GetDislikedEventsTool(preferences)]
     agent = Agent(
-        store=store,
-        preferences=preferences,
         system_prompt=system_prompt,
-        tools=ALL_TOOLS,
+        tools=tools,
         expected_output=parse_agent_response,
         debug=debug,
     )

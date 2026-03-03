@@ -8,13 +8,13 @@ import sys
 from pathlib import Path
 
 from luma.agent import (
-    ALL_TOOLS,
     Agent,
     AgentResult,
     build_system_prompt,
     build_user_message,
     parse_agent_response,
 )
+from luma.agent.tools import GetDislikedEventsTool, GetLikedEventsTool, QueryEventsTool
 from luma.event_store import EventStore, MemoryProvider
 from luma.preference_store import MemoryPreferenceProvider, PreferenceStore
 
@@ -60,12 +60,11 @@ def _make_task():
     def task(inp: QueryInput) -> AgentResult:
         store = EventStore(MemoryProvider(events=inp.events))
         preferences = PreferenceStore(MemoryPreferenceProvider())
+        tools = [QueryEventsTool(store), GetLikedEventsTool(preferences), GetDislikedEventsTool(preferences)]
         user_message = build_user_message(inp.prompt, inp.params)
         agent = Agent(
-            store=store,
-            preferences=preferences,
             system_prompt=system_prompt,
-            tools=ALL_TOOLS,
+            tools=tools,
             expected_output=parse_agent_response,
         )
         return agent.query(user_message)
