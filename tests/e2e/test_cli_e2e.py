@@ -637,3 +637,222 @@ def test_range_invalid(tmp_path, capsys):
     _write_cache(tmp_path)
     rc = _run_cli(["--cache-dir", str(tmp_path), "--range", "foobar"])
     assert rc == 2
+
+
+# ---------------------------------------------------------------------------
+# Like / Dislike tests
+# ---------------------------------------------------------------------------
+
+
+def _write_preferences(luma_dir, filename, events):
+    """Write a preference file (liked.json or disliked.json)."""
+    luma_dir.mkdir(parents=True, exist_ok=True)
+    path = luma_dir / filename
+    path.write_text(
+        json.dumps([e.to_dict() for e in events], indent=2), encoding="utf-8"
+    )
+
+
+def test_like_saves_event(tmp_path, capsys, monkeypatch):
+    _write_cache(tmp_path)
+    luma_dir = tmp_path / "luma"
+    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("builtins.input", lambda _: "1")
+    monkeypatch.setattr("sys.stdin", type("FakeTTY", (), {"isatty": lambda self: True})())
+    rc = _run_cli(["--cache-dir", str(tmp_path), "like"])
+    assert rc == 0
+    liked_path = luma_dir / "liked.json"
+    assert liked_path.is_file()
+    liked = json.loads(liked_path.read_text(encoding="utf-8"))
+    assert len(liked) == 1
+    assert liked[0]["id"] == SAMPLE_EVENTS[0].id
+
+
+def test_like_hides_already_liked(tmp_path, capsys, monkeypatch):
+    _write_cache(tmp_path)
+    luma_dir = tmp_path / "luma"
+    _write_preferences(luma_dir, "liked.json", [SAMPLE_EVENTS[0]])
+    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("builtins.input", lambda _: "1")
+    monkeypatch.setattr("sys.stdin", type("FakeTTY", (), {"isatty": lambda self: True})())
+    rc = _run_cli(["--cache-dir", str(tmp_path), "like"])
+    assert rc == 0
+    liked = json.loads((luma_dir / "liked.json").read_text(encoding="utf-8"))
+    liked_ids = [e["id"] for e in liked]
+    assert SAMPLE_EVENTS[1].id in liked_ids
+    assert liked_ids.count(SAMPLE_EVENTS[0].id) == 1
+
+
+def test_like_hides_already_disliked(tmp_path, capsys, monkeypatch):
+    _write_cache(tmp_path)
+    luma_dir = tmp_path / "luma"
+    _write_preferences(luma_dir, "disliked.json", [SAMPLE_EVENTS[0]])
+    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("builtins.input", lambda _: "1")
+    monkeypatch.setattr("sys.stdin", type("FakeTTY", (), {"isatty": lambda self: True})())
+    rc = _run_cli(["--cache-dir", str(tmp_path), "like"])
+    assert rc == 0
+    liked = json.loads((luma_dir / "liked.json").read_text(encoding="utf-8"))
+    liked_ids = [e["id"] for e in liked]
+    # First event was disliked so hidden; position 1 should be the second event
+    assert SAMPLE_EVENTS[1].id in liked_ids
+    assert SAMPLE_EVENTS[0].id not in liked_ids
+
+
+def test_like_empty_input(tmp_path, capsys, monkeypatch):
+    _write_cache(tmp_path)
+    luma_dir = tmp_path / "luma"
+    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("builtins.input", lambda _: "")
+    monkeypatch.setattr("sys.stdin", type("FakeTTY", (), {"isatty": lambda self: True})())
+    rc = _run_cli(["--cache-dir", str(tmp_path), "like"])
+    assert rc == 0
+    assert not (luma_dir / "liked.json").exists()
+
+
+def test_like_ctrl_c(tmp_path, capsys, monkeypatch):
+    _write_cache(tmp_path)
+    luma_dir = tmp_path / "luma"
+    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+
+    def _raise_interrupt(_):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("builtins.input", _raise_interrupt)
+    monkeypatch.setattr("sys.stdin", type("FakeTTY", (), {"isatty": lambda self: True})())
+    rc = _run_cli(["--cache-dir", str(tmp_path), "like"])
+    assert rc == 0
+
+
+def test_like_non_tty(tmp_path, capsys, monkeypatch):
+    _write_cache(tmp_path)
+    luma_dir = tmp_path / "luma"
+    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("sys.stdin", type("FakeNoTTY", (), {"isatty": lambda self: False})())
+    rc = _run_cli(["--cache-dir", str(tmp_path), "like"])
+    assert rc == 2
+
+
+def test_like_with_filters(tmp_path, capsys, monkeypatch):
+    _write_cache(tmp_path)
+    luma_dir = tmp_path / "luma"
+    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("builtins.input", lambda _: "1")
+    monkeypatch.setattr("sys.stdin", type("FakeTTY", (), {"isatty": lambda self: True})())
+    rc = _run_cli(["--cache-dir", str(tmp_path), "like", "--min-guest", "100"])
+    assert rc == 0
+    liked = json.loads((luma_dir / "liked.json").read_text(encoding="utf-8"))
+    assert len(liked) == 1
+    assert liked[0]["guest_count"] >= 100
+
+
+def test_like_invalid_number(tmp_path, capsys, monkeypatch):
+    _write_cache(tmp_path)
+    luma_dir = tmp_path / "luma"
+    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("builtins.input", lambda _: "999")
+    monkeypatch.setattr("sys.stdin", type("FakeTTY", (), {"isatty": lambda self: True})())
+    rc = _run_cli(["--cache-dir", str(tmp_path), "like"])
+    assert rc == 2
+
+
+def test_inline_dislike_saves_event(tmp_path, capsys, monkeypatch):
+    _write_cache(tmp_path)
+    luma_dir = tmp_path / "luma"
+    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("builtins.input", lambda _: "-1")
+    monkeypatch.setattr("sys.stdin", type("FakeTTY", (), {"isatty": lambda self: True})())
+    rc = _run_cli(["--cache-dir", str(tmp_path), "like"])
+    assert rc == 0
+    disliked_path = luma_dir / "disliked.json"
+    assert disliked_path.is_file()
+    disliked = json.loads(disliked_path.read_text(encoding="utf-8"))
+    assert len(disliked) == 1
+    assert disliked[0]["id"] == SAMPLE_EVENTS[0].id
+
+
+def test_inline_mixed_like_and_dislike(tmp_path, capsys, monkeypatch):
+    _write_cache(tmp_path)
+    luma_dir = tmp_path / "luma"
+    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("builtins.input", lambda _: "1 -2")
+    monkeypatch.setattr("sys.stdin", type("FakeTTY", (), {"isatty": lambda self: True})())
+    rc = _run_cli(["--cache-dir", str(tmp_path), "like"])
+    assert rc == 0
+    liked = json.loads((luma_dir / "liked.json").read_text(encoding="utf-8"))
+    disliked = json.loads((luma_dir / "disliked.json").read_text(encoding="utf-8"))
+    assert len(liked) == 1
+    assert liked[0]["id"] == SAMPLE_EVENTS[0].id
+    assert len(disliked) == 1
+    assert disliked[0]["id"] == SAMPLE_EVENTS[1].id
+
+
+# ---------------------------------------------------------------------------
+# Suggest tests
+# ---------------------------------------------------------------------------
+
+
+def test_suggest_no_cache(tmp_path, capsys, monkeypatch):
+    luma_dir = tmp_path / "luma"
+    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "suggest"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "luma refresh" in err
+    assert "luma like" in err
+
+
+def test_suggest_no_likes(tmp_path, capsys, monkeypatch):
+    _write_cache(tmp_path)
+    luma_dir = tmp_path / "luma"
+    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "suggest"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "luma like" in err
+
+
+def test_suggest_success(tmp_path, capsys, monkeypatch):
+    _write_cache(tmp_path)
+    luma_dir = tmp_path / "luma"
+    _write_preferences(luma_dir, "liked.json", [SAMPLE_EVENTS[0]])
+    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr(
+        "luma.ranker.rank",
+        lambda liked, disliked, candidates, **kw: [SAMPLE_EVENTS[1].id],
+    )
+    rc = _run_cli(["--cache-dir", str(tmp_path), "suggest"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Tech Talk" in out
+
+
+def test_suggest_ranker_error(tmp_path, capsys, monkeypatch):
+    from luma.ranker import RankerError
+
+    _write_cache(tmp_path)
+    luma_dir = tmp_path / "luma"
+    _write_preferences(luma_dir, "liked.json", [SAMPLE_EVENTS[0]])
+    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+
+    def _raise_error(*args, **kwargs):
+        raise RankerError("API failed")
+
+    monkeypatch.setattr("luma.ranker.rank", _raise_error)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "suggest"])
+    assert rc == 1
+    assert "API failed" in capsys.readouterr().err

@@ -27,9 +27,12 @@ from luma.config import (
     DEFAULT_AGENT_MAX_ITERATIONS,
     DEFAULT_AGENT_MODEL,
     DEFAULT_SORT,
+    SUGGEST_MAX_DISLIKED,
+    SUGGEST_MAX_LIKED,
     TIMEZONE_NAME,
 )
 from luma.event_store import CacheError, EventStore, QueryParams, QueryValidationError
+from luma.preference_store import PreferenceStore
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +188,20 @@ def _build_tool_schema() -> dict[str, Any]:
 
 QUERY_EVENTS_TOOL: dict[str, Any] = _build_tool_schema()
 
+GET_LIKED_EVENTS_TOOL: dict[str, Any] = {
+    "name": "get_liked_events",
+    "description": "Get events the user has liked. Returns up to 20 most recent liked events.",
+    "input_schema": {"type": "object", "properties": {}},
+}
+
+GET_DISLIKED_EVENTS_TOOL: dict[str, Any] = {
+    "name": "get_disliked_events",
+    "description": "Get events the user has disliked. Returns up to 20 most recent disliked events.",
+    "input_schema": {"type": "object", "properties": {}},
+}
+
+ALL_TOOLS: list[dict[str, Any]] = [QUERY_EVENTS_TOOL, GET_LIKED_EVENTS_TOOL, GET_DISLIKED_EVENTS_TOOL]
+
 _PROMPTS_DIR = pathlib.Path(__file__).parent / "prompts"
 _MARKDOWN_FENCE_RE = re.compile(r"```(?:json)?\s*\n(.*?)\n```", re.DOTALL)
 _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
@@ -202,12 +219,14 @@ class Agent:
     def __init__(
         self,
         store: EventStore,
+        preferences: PreferenceStore,
         *,
         model: str = DEFAULT_AGENT_MODEL,
         max_iterations: int = DEFAULT_AGENT_MAX_ITERATIONS,
         debug: bool = False,
     ) -> None:
         self._store = store
+        self._preferences = preferences
         self._model = model
         self._max_iterations = max_iterations
         self._debug = debug
@@ -288,11 +307,19 @@ class Agent:
                 if self._debug:
                     for b in tool_use_blocks:
                         print(f"[debug] tool call: {b.name} {b.input}", file=sys.stderr)
-                count = len(tool_use_blocks)
-                if count > 1:
-                    yield TextOutput(text=f"Searching events ({count} queries)...")
-                else:
-                    yield TextOutput(text="Searching events...")
+                query_count = sum(1 for b in tool_use_blocks if b.name == "query_events")
+                pref_names = [b.name for b in tool_use_blocks if b.name in ("get_liked_events", "get_disliked_events")]
+                parts: list[str] = []
+                if query_count > 1:
+                    parts.append(f"Searching events ({query_count} queries)")
+                elif query_count == 1:
+                    parts.append("Searching events")
+                if "get_liked_events" in pref_names:
+                    parts.append("Loading liked events")
+                if "get_disliked_events" in pref_names:
+                    parts.append("Loading disliked events")
+                if parts:
+                    yield TextOutput(text=f"{', '.join(parts)}...")
                 tool_results = []
                 for batch_start in range(
                     0, len(tool_use_blocks), AGENT_MAX_PARALLEL_TOOLS
@@ -412,7 +439,7 @@ class Agent:
                 max_tokens=AGENT_MAX_TOKENS,
                 system=system_prompt,
                 messages=messages,
-                tools=[QUERY_EVENTS_TOOL],
+                tools=ALL_TOOLS,
             )
             try:
                 return future.result(timeout=AGENT_LLM_TIMEOUT_SECONDS)
@@ -426,15 +453,25 @@ class Agent:
         self, name: str, tool_input: dict[str, Any]
     ) -> tuple[str, bool]:
         """Returns (result_content, is_error)."""
-        if name != "query_events":
-            return (f"Unknown tool: {name}", True)
-        try:
-            agent_params = AgentQueryParams.model_validate(tool_input)
-            params = _to_query_params(agent_params)
-            result = self._store.query(params)
-            return (json.dumps([e.to_dict() for e in result.events]), False)
-        except (ValidationError, QueryValidationError, CacheError) as exc:
-            return (f"Tool error: {exc}", True)
+        if name == "query_events":
+            try:
+                agent_params = AgentQueryParams.model_validate(tool_input)
+                params = _to_query_params(agent_params)
+                result = self._store.query(params)
+                return (json.dumps([e.to_dict() for e in result.events]), False)
+            except (ValidationError, QueryValidationError, CacheError) as exc:
+                return (f"Tool error: {exc}", True)
+        if name == "get_liked_events":
+            events = self._preferences.get_liked()
+            events.sort(key=lambda e: e.start_at, reverse=True)
+            events = events[:SUGGEST_MAX_LIKED]
+            return (json.dumps([e.to_dict() for e in events]), False)
+        if name == "get_disliked_events":
+            events = self._preferences.get_disliked()
+            events.sort(key=lambda e: e.start_at, reverse=True)
+            events = events[:SUGGEST_MAX_DISLIKED]
+            return (json.dumps([e.to_dict() for e in events]), False)
+        return (f"Unknown tool: {name}", True)
 
     def _parse_response(self, text: str) -> AgentResult:
         cleaned = text.strip()

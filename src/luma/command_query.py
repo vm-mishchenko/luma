@@ -9,7 +9,11 @@ import sys
 import threading
 import time
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
+
+if TYPE_CHECKING:
+    from luma.preference_store import PreferenceStore
 
 from luma.config import (
     DEFAULT_WINDOW_DAYS,
@@ -297,7 +301,7 @@ def _query(
     return 0
 
 
-def _agent_query(args: argparse.Namespace, store: EventStore) -> int:
+def _agent_query(args: argparse.Namespace, store: EventStore, preferences: "PreferenceStore") -> int:
     from luma.agent import (
         Agent,
         AgentError,
@@ -310,7 +314,7 @@ def _agent_query(args: argparse.Namespace, store: EventStore) -> int:
 
     debug = getattr(args, "debug", False)
     params = _build_query_params(args)
-    agent = Agent(store=store, debug=debug)
+    agent = Agent(store=store, preferences=preferences, debug=debug)
 
     if args.json_output:
         try:
@@ -377,7 +381,8 @@ def run(
     args: argparse.Namespace,
     store: EventStore,
     cache_dir: pathlib.Path,
+    preferences: "PreferenceStore",
 ) -> int:
     if args.query_text:
-        return _agent_query(args, store)
+        return _agent_query(args, store, preferences)
     return _query(args, store, cache_dir)

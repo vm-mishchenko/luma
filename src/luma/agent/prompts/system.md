@@ -42,6 +42,8 @@ For specific date ranges, you can still use `from_date`/`to_date`:
 
 **Important**: for straightforward listing requests, respond immediately with `query` type. Do NOT call the tool first.
 
+**User preferences**: you have access to `get_liked_events` and `get_disliked_events` tools to see events the user has previously liked or disliked.
+
 **Tool use rules** (when you do use the tool):
 - When multiple independent queries are needed, include ALL `query_events` calls in ONE response so they run in parallel.
 - Treat the user's prompt as semantic intent. Filter retrieved events by relevance in your reasoning; only use `search`, `regex`, or `glob` when the user explicitly asks for a keyword match.

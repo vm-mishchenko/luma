@@ -9,6 +9,7 @@ import time
 
 from luma.agent import Agent
 from luma.event_store import EventStore
+from luma.preference_store import PreferenceStore
 
 
 class _Spinner:
@@ -43,9 +44,9 @@ class _Spinner:
         print("\r  \r", end="", flush=True)
 
 
-def run(store: EventStore) -> int:
+def run(store: EventStore, preferences: PreferenceStore) -> int:
     print("luma chat (Ctrl+D to exit)")
-    agent = Agent(store=store)
+    agent = Agent(store=store, preferences=preferences)
     history: list[dict[str, str]] = []
 
     while True:

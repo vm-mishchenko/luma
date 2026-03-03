@@ -9,6 +9,7 @@ from pathlib import Path
 
 from luma.agent import Agent, AgentResult
 from luma.event_store import EventStore, MemoryProvider
+from luma.preference_store import MemoryPreferenceProvider, PreferenceStore
 
 from .models import QueryInput
 
@@ -49,7 +50,8 @@ def _load_dataset(name: str):
 def _make_task():
     def task(inp: QueryInput) -> AgentResult:
         store = EventStore(MemoryProvider(events=inp.events))
-        agent = Agent(store=store)
+        preferences = PreferenceStore(MemoryPreferenceProvider())
+        agent = Agent(store=store, preferences=preferences)
         return agent.query(inp.prompt, inp.params)
 
     return task
