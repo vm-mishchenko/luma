@@ -87,7 +87,8 @@ make test
 Each dataset has a committed `<dataset>.baseline.json` that lives next to the dataset file. On every `make eval` run the runner loads it automatically and prints a diff table. To save a new baseline after you are satisfied with results:
 
 ```shell
-make save-baseline SET=query_command/date_parsing
+make save-baseline SET=query_command/date_parsing  # single dataset
+make save-baseline-all                              # all datasets
 ```
 
 **Iteration workflow**

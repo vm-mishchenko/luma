@@ -242,11 +242,14 @@ def _run_eval(
         report.print(include_reasons=True)
         _save_baseline(eval_set, report, system_prompt)
     else:
-        baseline_report = _load_baseline(eval_set)
-        if baseline_report is not None:
-            report.print(baseline=baseline_report, include_reasons=verbose)
+        if verbose:
+            report.print(include_reasons=True)
         else:
-            report.print(include_reasons=verbose)
+            baseline_report = _load_baseline(eval_set)
+            if baseline_report is not None:
+                report.print(baseline=baseline_report)
+            else:
+                report.print()
 
 
 def main() -> int:
@@ -306,6 +309,8 @@ def main() -> int:
             return 0
         for eval_set in sets:
             print(f"\n=== Running: {eval_set} ===")
+            print(f"    make eval SET={eval_set}")
+            print(f"    make eval SET={eval_set} VERBOSE=1")
             _run_eval(eval_set, args.verbose, args.save_baseline, tags=tags or None)
         return 0
 

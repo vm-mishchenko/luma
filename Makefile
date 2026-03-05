@@ -1,7 +1,7 @@
 VENV := .venv
 BIN  := $(VENV)/bin
 
-.PHONY: setup clean test run eval eval-list eval-all save-baseline eval-smoke
+.PHONY: setup clean test run eval eval-list eval-all save-baseline save-baseline-all eval-smoke
 
 setup:
 	python3 -m venv $(VENV)
@@ -29,6 +29,9 @@ eval-all:
 
 save-baseline:
 	$(BIN)/python -m evals.runner --save-baseline $(if $(SET),--set $(SET)) $(if $(VERBOSE),--verbose)
+
+save-baseline-all:
+	$(BIN)/python -m evals.runner --save-baseline --all $(if $(VERBOSE),--verbose)
 
 eval-smoke:
 	$(BIN)/python -m evals.runner --all --smoke $(if $(VERBOSE),--verbose)
