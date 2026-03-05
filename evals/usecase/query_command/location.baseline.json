@@ -1,0 +1,66 @@
+{
+  "prompt_hash": "e82b9194",
+  "model": "claude-sonnet-4-20250514",
+  "averages": {
+    "field_match_ratio": 0.75,
+    "input_tokens": 4495.25,
+    "output_tokens": 34.5,
+    "llm_calls": 1.0,
+    "tool_calls": 0.0,
+    "assertions_pass_rate": 0.7916666666666666
+  },
+  "cases": {
+    "city_sf": {
+      "ResultTypeMatch": true,
+      "exact_match": true,
+      "coordinates_set": false,
+      "no_tool_use": true,
+      "within_token_budget": true,
+      "within_time_budget": true,
+      "field_match_ratio": 1.0,
+      "input_tokens": 4494,
+      "output_tokens": 21,
+      "llm_calls": 1,
+      "tool_calls": 0
+    },
+    "city_sf_offline": {
+      "ResultTypeMatch": true,
+      "exact_match": true,
+      "coordinates_set": false,
+      "no_tool_use": true,
+      "within_token_budget": true,
+      "within_time_budget": true,
+      "field_match_ratio": 1.0,
+      "input_tokens": 4498,
+      "output_tokens": 27,
+      "llm_calls": 1,
+      "tool_calls": 0
+    },
+    "online_events": {
+      "ResultTypeMatch": true,
+      "exact_match": false,
+      "coordinates_set": false,
+      "no_tool_use": true,
+      "within_token_budget": true,
+      "within_time_budget": true,
+      "field_match_ratio": 0.6666666666666666,
+      "input_tokens": 4495,
+      "output_tokens": 33,
+      "llm_calls": 1,
+      "tool_calls": 0
+    },
+    "coordinates_stanford": {
+      "ResultTypeMatch": true,
+      "exact_match": false,
+      "coordinates_set": true,
+      "no_tool_use": true,
+      "within_token_budget": true,
+      "within_time_budget": true,
+      "field_match_ratio": 0.3333333333333333,
+      "input_tokens": 4494,
+      "output_tokens": 57,
+      "llm_calls": 1,
+      "tool_calls": 0
+    }
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "prompt_hash": "e82b9194",
+  "model": "claude-sonnet-4-20250514",
+  "averages": {
+    "input_tokens": 6622.0,
+    "output_tokens": 73.0,
+    "llm_calls": 1.4,
+    "tool_calls": 0.0,
+    "assertions_pass_rate": 0.7333333333333333
+  },
+  "cases": {
+    "count_question": {
+      "text_not_empty": true,
+      "within_token_budget": false,
+      "within_time_budget": true,
+      "input_tokens": 10088,
+      "output_tokens": 103,
+      "llm_calls": 2,
+      "tool_calls": 0
+    },
+    "comparison_query": {
+      "text_not_empty": true,
+      "within_token_budget": false,
+      "within_time_budget": true,
+      "input_tokens": 9532,
+      "output_tokens": 152,
+      "llm_calls": 2,
+      "tool_calls": 0
+    },
+    "irrelevant_query": {
+      "text_not_empty": true,
+      "within_token_budget": true,
+      "within_time_budget": true,
+      "input_tokens": 4497,
+      "output_tokens": 74,
+      "llm_calls": 1,
+      "tool_calls": 0
+    },
+    "vague_query": {
+      "text_not_empty": false,
+      "within_token_budget": true,
+      "within_time_budget": true,
+      "input_tokens": 4495,
+      "output_tokens": 16,
+      "llm_calls": 1,
+      "tool_calls": 0
+    },
+    "empty_fixture": {
+      "text_not_empty": false,
+      "within_token_budget": true,
+      "within_time_budget": true,
+      "input_tokens": 4498,
+      "output_tokens": 20,
+      "llm_calls": 1,
+      "tool_calls": 0
+    }
+  }
+}

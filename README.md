@@ -73,17 +73,29 @@ make test
 
 ## Evals
 
-Run agent evaluations using `pydantic-evals` (installed via `make setup`):
+**Running evals**
+
+- `make eval-list` -- list all available datasets
+- `make eval-smoke` -- one tagged case per dataset, fast sanity check
+- `make eval SET=query_command/date_parsing` -- single dataset
+- `make eval-all` -- all datasets sequentially
+- `make eval-all TAG=nature:edge_case` -- filter cases by metadata tag across all datasets
+- `make eval VERBOSE=1` or `make eval-all VERBOSE=1` -- show per-assertion pass/fail reasons
+
+**Baselines**
+
+Each dataset has a committed `<dataset>.baseline.json` that lives next to the dataset file. On every `make eval` run the runner loads it automatically and prints a diff table. To save a new baseline after you are satisfied with results:
 
 ```shell
-# List available eval sets
-make eval
-
-# Run a specific eval set
-make eval SET=smoke
-
-# Verbose output (per-evaluator detail)
-make eval SET=smoke VERBOSE=1
+make save-baseline SET=query_command/date_parsing
 ```
 
-Add a new eval set by creating a Python file in `evals/` that defines a `dataset` variable.
+**Iteration workflow**
+
+1. `make eval-smoke` — confirm nothing is broken
+2. `make eval SET=<dataset>` — inspect the affected capability in detail
+3. Make a change (prompt, tool, params)
+4. `make eval SET=<dataset>` — review diff against baseline
+5. Repeat 3–4 until satisfied
+6. `make save-baseline SET=<dataset>` — record new baseline
+7. Commit the change and the updated `.baseline.json` together

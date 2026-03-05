@@ -1,0 +1,86 @@
+{
+  "prompt_hash": "64672ace",
+  "model": "claude-sonnet-4-20250514",
+  "averages": {
+    "field_match_ratio": 1.0,
+    "input_tokens": 4496.0,
+    "output_tokens": 25.666666666666668,
+    "llm_calls": 1.0,
+    "tool_calls": 0.0,
+    "assertions_pass_rate": 1.0
+  },
+  "cases": {
+    "range_tomorrow": {
+      "ResultTypeMatch": true,
+      "exact_match": true,
+      "no_tool_use": true,
+      "within_token_budget": true,
+      "within_time_budget": true,
+      "field_match_ratio": 1.0,
+      "input_tokens": 4496,
+      "output_tokens": 20,
+      "llm_calls": 1,
+      "tool_calls": 0
+    },
+    "range_weekend": {
+      "ResultTypeMatch": true,
+      "exact_match": true,
+      "no_tool_use": true,
+      "within_token_budget": true,
+      "within_time_budget": true,
+      "field_match_ratio": 1.0,
+      "input_tokens": 4494,
+      "output_tokens": 20,
+      "llm_calls": 1,
+      "tool_calls": 0
+    },
+    "range_next_week": {
+      "ResultTypeMatch": true,
+      "exact_match": true,
+      "no_tool_use": true,
+      "within_token_budget": true,
+      "within_time_budget": true,
+      "field_match_ratio": 1.0,
+      "input_tokens": 4497,
+      "output_tokens": 41,
+      "llm_calls": 1,
+      "tool_calls": 0
+    },
+    "range_weekday": {
+      "ResultTypeMatch": true,
+      "exact_match": true,
+      "no_tool_use": true,
+      "within_token_budget": true,
+      "within_time_budget": true,
+      "field_match_ratio": 1.0,
+      "input_tokens": 4497,
+      "output_tokens": 21,
+      "llm_calls": 1,
+      "tool_calls": 0
+    },
+    "specific_date": {
+      "ResultTypeMatch": true,
+      "exact_match": true,
+      "no_tool_use": true,
+      "within_token_budget": true,
+      "within_time_budget": true,
+      "field_match_ratio": 1.0,
+      "input_tokens": 4496,
+      "output_tokens": 32,
+      "llm_calls": 1,
+      "tool_calls": 0
+    },
+    "range_today": {
+      "ResultTypeMatch": true,
+      "exact_match": true,
+      "no_tool_use": true,
+      "within_token_budget": true,
+      "within_time_budget": true,
+      "field_match_ratio": 1.0,
+      "input_tokens": 4496,
+      "output_tokens": 20,
+      "llm_calls": 1,
+      "tool_calls": 0
+    }
+  }
+}

@@ -15,8 +15,11 @@ from datetime import datetime, timedelta
 from typing import Annotated, Any, Literal, Protocol, Union
 
 import anthropic
+import logfire
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from zoneinfo import ZoneInfo
+
+logfire.configure(send_to_logfire=False)
 
 from luma.agent.tool import Tool, ToolResult
 from luma.config import (
@@ -278,147 +281,161 @@ class Agent:
         loader: _Loader | None = None,
     ) -> Iterator[AgentOutput]:
         """Yields TextOutput, ToolFetchOutput at any point, FinalResult at the end."""
-        api_key = os.environ.get(ANTHROPIC_API_KEY_ENV)
-        if not api_key:
-            raise AgentError(
-                f"Environment variable {ANTHROPIC_API_KEY_ENV} is not set. "
-                "Set it to your Anthropic API key to use the agent."
-            )
-
-        client = anthropic.Anthropic(api_key=api_key)
-        messages: list[dict[str, Any]] = [{"role": "user", "content": text}]
-
-        for _ in range(self._max_iterations):
-            if loader and not self._debug:
-                loader.start("Thinking")
-            try:
-                t0 = time.perf_counter()
-                if self._debug:
-                    msg_chars = sum(
-                        len(str(m.get("content", ""))) for m in messages
-                    )
-                    print(
-                        f"[debug] Start LLM call: {len(messages)} messages"
-                        f"(system={len(self._system_prompt)}, messages={msg_chars})",
-                        file=sys.stderr,
-                    )
-                response = self._create_llm_response(
-                    client=client,
-                    messages=messages,
+        with logfire.span("agent.run"):
+            api_key = os.environ.get(ANTHROPIC_API_KEY_ENV)
+            if not api_key:
+                raise AgentError(
+                    f"Environment variable {ANTHROPIC_API_KEY_ENV} is not set. "
+                    "Set it to your Anthropic API key to use the agent."
                 )
-                if self._debug:
-                    elapsed = time.perf_counter() - t0
-                    print(
-                        f"[debug] End LLM call: {elapsed:.2f}s, {len(messages)} messages",
-                        file=sys.stderr,
-                    )
-            except anthropic.APIError as exc:
-                if loader:
-                    loader.stop()
-                raise AgentError(f"Anthropic API error: {exc}") from exc
-            finally:
-                if loader:
-                    loader.stop()
 
-            turn_text = "".join(
-                block.text
-                for block in response.content
-                if hasattr(block, "text")
-            )
+            client = anthropic.Anthropic(api_key=api_key)
+            messages: list[dict[str, Any]] = [{"role": "user", "content": text}]
 
-            if response.stop_reason == "end_turn":
-                result = self._parse_response(turn_text)
-                if self._debug:
-                    label = type(result).__name__
-                    if isinstance(result, QueryParamsResult):
-                        label += f" {result.params.model_dump(exclude_none=True)}"
-                    print(f"[debug] response type: {label}", file=sys.stderr)
-                yield FinalResult(result=result)
-                return
+            for _ in range(self._max_iterations):
+                if loader and not self._debug:
+                    loader.start("Thinking")
+                try:
+                    t0 = time.perf_counter()
+                    if self._debug:
+                        msg_chars = sum(
+                            len(str(m.get("content", ""))) for m in messages
+                        )
+                        print(
+                            f"[debug] Start LLM call: {len(messages)} messages"
+                            f"(system={len(self._system_prompt)}, messages={msg_chars})",
+                            file=sys.stderr,
+                        )
+                    with logfire.span("agent.llm_call") as llm_span:
+                        response = self._create_llm_response(
+                            client=client,
+                            messages=messages,
+                        )
+                        llm_span.set_attribute("input_tokens", response.usage.input_tokens)
+                        llm_span.set_attribute("output_tokens", response.usage.output_tokens)
+                        llm_span.set_attribute("model", self._model)
+                        llm_span.set_attribute("stop_reason", response.stop_reason)
+                    if self._debug:
+                        elapsed = time.perf_counter() - t0
+                        print(
+                            f"[debug] End LLM call: {elapsed:.2f}s, {len(messages)} messages",
+                            file=sys.stderr,
+                        )
+                except anthropic.APIError as exc:
+                    if loader:
+                        loader.stop()
+                    raise AgentError(f"Anthropic API error: {exc}") from exc
+                finally:
+                    if loader:
+                        loader.stop()
 
-            if response.stop_reason == "tool_use":
-                if not self._tools_by_name:
-                    raise AgentError(
-                        "LLM requested tool use but no tools are configured"
-                    )
+                turn_text = "".join(
+                    block.text
+                    for block in response.content
+                    if hasattr(block, "text")
+                )
 
-                tool_use_blocks = [
-                    block for block in response.content
-                    if block.type == "tool_use"
-                ]
-                if self._debug:
-                    for b in tool_use_blocks:
-                        print(f"[debug] tool call: {b.name} {b.input}", file=sys.stderr)
+                if response.stop_reason == "end_turn":
+                    result = self._parse_response(turn_text)
+                    if self._debug:
+                        label = type(result).__name__
+                        if isinstance(result, QueryParamsResult):
+                            label += f" {result.params.model_dump(exclude_none=True)}"
+                        print(f"[debug] response type: {label}", file=sys.stderr)
+                    yield FinalResult(result=result)
+                    return
 
-                if turn_text.strip():
-                    yield TextOutput(text=turn_text.strip())
+                if response.stop_reason == "tool_use":
+                    if not self._tools_by_name:
+                        raise AgentError(
+                            "LLM requested tool use but no tools are configured"
+                        )
 
-                counts: dict[str, int] = {}
-                for b in tool_use_blocks:
-                    counts[b.name] = counts.get(b.name, 0) + 1
-                parts: list[str] = []
-                for tool_name, count in counts.items():
-                    tool = self._tools_by_name.get(tool_name)
-                    if tool:
-                        msg = tool.loading_message
-                        if count > 1:
-                            msg = f"{msg} ({count} queries)"
-                        parts.append(msg)
-                if parts:
-                    yield TextOutput(text=f"{', '.join(parts)}...")
-
-                tool_results = []
-                executed_results: list[ToolResult] = []
-                for batch_start in range(
-                    0, len(tool_use_blocks), AGENT_MAX_PARALLEL_TOOLS
-                ):
-                    batch = tool_use_blocks[
-                        batch_start : batch_start + AGENT_MAX_PARALLEL_TOOLS
+                    tool_use_blocks = [
+                        block for block in response.content
+                        if block.type == "tool_use"
                     ]
-                    with ThreadPoolExecutor(
-                        max_workers=AGENT_MAX_PARALLEL_TOOLS
-                    ) as ex:
-                        futures = [
-                            ex.submit(self._execute_tool, block.name, block.input)
-                            for block in batch
+                    if self._debug:
+                        for b in tool_use_blocks:
+                            print(f"[debug] tool call: {b.name} {b.input}", file=sys.stderr)
+
+                    if turn_text.strip():
+                        yield TextOutput(text=turn_text.strip())
+
+                    counts: dict[str, int] = {}
+                    for b in tool_use_blocks:
+                        counts[b.name] = counts.get(b.name, 0) + 1
+                    parts: list[str] = []
+                    for tool_name, count in counts.items():
+                        tool = self._tools_by_name.get(tool_name)
+                        if tool:
+                            msg = tool.loading_message
+                            if count > 1:
+                                msg = f"{msg} ({count} queries)"
+                            parts.append(msg)
+                    if parts:
+                        yield TextOutput(text=f"{', '.join(parts)}...")
+
+                    tool_results = []
+                    executed_results: list[ToolResult] = []
+                    for batch_start in range(
+                        0, len(tool_use_blocks), AGENT_MAX_PARALLEL_TOOLS
+                    ):
+                        batch = tool_use_blocks[
+                            batch_start : batch_start + AGENT_MAX_PARALLEL_TOOLS
                         ]
-                        for block, future in zip(batch, futures, strict=True):
-                            try:
-                                result = future.result(
-                                    timeout=AGENT_TOOL_TIMEOUT_SECONDS
-                                )
-                            except FuturesTimeoutError:
-                                result = ToolResult(
-                                    content=(
-                                        f"Tool {block.name} timed out after "
-                                        f"{AGENT_TOOL_TIMEOUT_SECONDS}s"
-                                    ),
-                                    is_error=True,
-                                )
-                            executed_results.append(result)
-                            tool_results.append(
-                                {
-                                    "type": "tool_result",
-                                    "tool_use_id": block.id,
-                                    "content": result.content,
-                                    "is_error": result.is_error,
-                                }
-                            )
-                fetch_count = sum(
-                    1
-                    for r in executed_results
-                    if r.metadata and r.metadata.get("fetch")
-                )
-                if fetch_count > 0:
-                    yield ToolFetchOutput(count=fetch_count)
 
-                messages.append({"role": "assistant", "content": response.content})
-                messages.append({"role": "user", "content": tool_results})
-                continue
+                        def _execute_with_span(block: Any) -> ToolResult:
+                            with logfire.span("agent.tool_call") as tool_span:
+                                res = self._execute_tool(block.name, block.input)
+                                tool_span.set_attribute("tool_name", block.name)
+                                tool_span.set_attribute("is_error", res.is_error)
+                            return res
 
-        raise AgentError(
-            f"Agent exceeded maximum iterations ({self._max_iterations})"
-        )
+                        with ThreadPoolExecutor(
+                            max_workers=AGENT_MAX_PARALLEL_TOOLS
+                        ) as ex:
+                            futures = [
+                                ex.submit(_execute_with_span, block)
+                                for block in batch
+                            ]
+                            for block, future in zip(batch, futures, strict=True):
+                                try:
+                                    result = future.result(
+                                        timeout=AGENT_TOOL_TIMEOUT_SECONDS
+                                    )
+                                except FuturesTimeoutError:
+                                    result = ToolResult(
+                                        content=(
+                                            f"Tool {block.name} timed out after "
+                                            f"{AGENT_TOOL_TIMEOUT_SECONDS}s"
+                                        ),
+                                        is_error=True,
+                                    )
+                                executed_results.append(result)
+                                tool_results.append(
+                                    {
+                                        "type": "tool_result",
+                                        "tool_use_id": block.id,
+                                        "content": result.content,
+                                        "is_error": result.is_error,
+                                    }
+                                )
+                    fetch_count = sum(
+                        1
+                        for r in executed_results
+                        if r.metadata and r.metadata.get("fetch")
+                    )
+                    if fetch_count > 0:
+                        yield ToolFetchOutput(count=fetch_count)
+
+                    messages.append({"role": "assistant", "content": response.content})
+                    messages.append({"role": "user", "content": tool_results})
+                    continue
+
+            raise AgentError(
+                f"Agent exceeded maximum iterations ({self._max_iterations})"
+            )
 
     def query(self, text: str) -> AgentResult:
         """Consume query_iter and return the final result."""
