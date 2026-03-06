@@ -18,7 +18,7 @@ from luma.agent import (
     build_user_message,
     parse_agent_response,
 )
-from luma.agent.tools import GetDislikedEventsTool, GetLikedEventsTool, QueryEventsTool
+from luma.agent.tools import GetDislikedEventsTool, GetEventDetailTool, GetLikedEventsTool, QueryEventsTool
 from luma.config import DEFAULT_AGENT_MODEL
 from luma.event_store import EventStore, MemoryProvider
 from luma.preference_store import MemoryPreferenceProvider, PreferenceStore
@@ -71,6 +71,7 @@ def _make_task():
             QueryEventsTool(store),
             GetLikedEventsTool(preferences),
             GetDislikedEventsTool(preferences),
+            GetEventDetailTool(),
         ]
         user_message = build_user_message(inp.prompt, inp.params)
         agent = Agent(

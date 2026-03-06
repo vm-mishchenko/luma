@@ -7,6 +7,7 @@ from typing import Any
 
 from luma.agent.tool import ToolResult
 from luma.config import SUGGEST_MAX_DISLIKED
+from luma.models import Event
 from luma.preference_store import PreferenceStore
 
 
@@ -20,7 +21,11 @@ class GetDislikedEventsTool:
 
     @property
     def description(self) -> str:
-        return f"Get events the user has disliked. Returns up to {SUGGEST_MAX_DISLIKED} most recent disliked events."
+        props = Event.model_json_schema()["properties"]
+        return (
+            f"Get events the user has disliked. Returns up to {SUGGEST_MAX_DISLIKED} most recent disliked events. "
+            "Returns: " + json.dumps(props)
+        )
 
     @property
     def input_schema(self) -> dict[str, Any]:
@@ -35,6 +40,6 @@ class GetDislikedEventsTool:
         events.sort(key=lambda e: e.start_at, reverse=True)
         events = events[:SUGGEST_MAX_DISLIKED]
         return ToolResult(
-            content=json.dumps([e.to_dict() for e in events]),
+            content=json.dumps([e.model_dump() for e in events]),
             is_error=False,
         )

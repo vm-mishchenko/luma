@@ -213,7 +213,7 @@ class DiskProvider:
         filename = f"{EVENTS_FILENAME_PREFIX}{stamp}.json"
         payload = {
             "fetched_at": fetched_at.isoformat(),
-            "events": [e.to_dict() for e in events],
+            "events": [e.model_dump() for e in events],
         }
         path = self._cache_dir / filename
         with open(path, "w", encoding="utf-8") as f:
@@ -245,7 +245,7 @@ class DiskProvider:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            return [Event.from_dict(d) for d in data["events"]]
+            return [Event.model_validate(d) for d in data["events"]]
         except (json.JSONDecodeError, KeyError, OSError) as err:
             raise CacheError(f"Cannot read cache file {path}: {err}") from err
 

@@ -14,7 +14,6 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -27,24 +26,7 @@ from luma.config import (
     PAGINATION_LIMIT,
     REQUEST_DELAY_SEC,
 )
-from luma.models import Event, Host
-
-
-@dataclass
-class _EventRecord:
-    api_id: str
-    title: str
-    url: str
-    start_at: str
-    guest_count: int
-    source: str
-    location_type: str | None
-    latitude: float | None
-    longitude: float | None
-    city: str | None
-    region: str | None
-    country: str | None
-    hosts: list[dict[str, Any]]
+from luma.models import Category, Event, EventDetail, Host
 
 
 def _parse_iso8601_utc(value: str) -> datetime:
@@ -153,7 +135,7 @@ def _resolve_source_for_calendar_url(
     return ("discover", None)
 
 
-def _event_from_entry(entry: dict[str, Any], source: str) -> _EventRecord | None:
+def _event_from_entry(entry: dict[str, Any], source: str) -> Event | None:
     event = entry.get("event", {})
     api_id = event.get("api_id")
     title = (event.get("name") or "").strip()
@@ -169,18 +151,22 @@ def _event_from_entry(entry: dict[str, Any], source: str) -> _EventRecord | None
 
     raw_hosts = entry.get("hosts") or []
     hosts = [
-        {"name": h["name"].strip(), "linkedin_handle": h.get("linkedin_handle"), "youtube_handle": h.get("youtube_handle")}
+        Host(
+            name=h["name"].strip(),
+            linkedin_handle=h.get("linkedin_handle"),
+            youtube_handle=h.get("youtube_handle"),
+        )
         for h in raw_hosts
         if (h.get("name") or "").strip()
     ]
 
-    return _EventRecord(
-        api_id=api_id,
+    return Event(
+        id=api_id,
         title=title,
         url=f"https://luma.com/{slug}",
         start_at=start_at,
         guest_count=guest_count,
-        source=source,
+        sources=[source],
         location_type=event.get("location_type"),
         latitude=coordinate.get("latitude"),
         longitude=coordinate.get("longitude"),
@@ -197,8 +183,8 @@ def _fetch_category_events(
     start_utc: datetime,
     end_utc: datetime,
     retries: int,
-) -> list[_EventRecord]:
-    results: list[_EventRecord] = []
+) -> list[Event]:
+    results: list[Event] = []
     web_url = f"https://luma.com/{category_slug}"
     cursor: str | None = None
     seen_cursors: set[str] = set()
@@ -220,12 +206,12 @@ def _fetch_category_events(
             break
 
         for entry in entries:
-            record = _event_from_entry(entry, source=f"category:{category_slug}")
-            if not record:
+            ev = _event_from_entry(entry, source=f"category:{category_slug}")
+            if not ev:
                 continue
-            dt = _parse_iso8601_utc(record.start_at)
+            dt = _parse_iso8601_utc(ev.start_at)
             if start_utc <= dt < end_utc:
-                results.append(record)
+                results.append(ev)
 
         if not data.get("has_more"):
             break
@@ -246,8 +232,8 @@ def _fetch_calendar_events(
     start_utc: datetime,
     end_utc: datetime,
     retries: int,
-) -> list[_EventRecord]:
-    results: list[_EventRecord] = []
+) -> list[Event]:
+    results: list[Event] = []
     web_url = f"https://luma.com/{calendar_slug}"
     cursor: str | None = None
     seen_cursors: set[str] = set()
@@ -268,12 +254,12 @@ def _fetch_calendar_events(
             break
 
         for entry in entries:
-            record = _event_from_entry(entry, source=f"calendar:{calendar_slug}")
-            if not record:
+            ev = _event_from_entry(entry, source=f"calendar:{calendar_slug}")
+            if not ev:
                 continue
-            dt = _parse_iso8601_utc(record.start_at)
+            dt = _parse_iso8601_utc(ev.start_at)
             if start_utc <= dt < end_utc:
-                results.append(record)
+                results.append(ev)
 
         if not data.get("has_more"):
             break
@@ -287,65 +273,52 @@ def _fetch_calendar_events(
     return results
 
 
-def _dedupe_by_url(records: list[_EventRecord]) -> list[Event]:
+def _dedupe_by_url(events: list[Event]) -> list[Event]:
     merged: dict[str, dict[str, Any]] = {}
-    for rec in records:
-        if rec.url not in merged:
-            merged[rec.url] = {
-                "api_id": rec.api_id,
-                "title": rec.title,
-                "url": rec.url,
-                "start_at": rec.start_at,
-                "guest_count": rec.guest_count,
-                "sources": {rec.source},
-                "location_type": rec.location_type,
-                "latitude": rec.latitude,
-                "longitude": rec.longitude,
-                "city": rec.city,
-                "region": rec.region,
-                "country": rec.country,
-                "hosts": rec.hosts,
+    for ev in events:
+        if ev.url not in merged:
+            merged[ev.url] = {
+                "id": ev.id,
+                "title": ev.title,
+                "url": ev.url,
+                "start_at": ev.start_at,
+                "guest_count": ev.guest_count,
+                "sources": set(ev.sources),
+                "location_type": ev.location_type,
+                "latitude": ev.latitude,
+                "longitude": ev.longitude,
+                "city": ev.city,
+                "region": ev.region,
+                "country": ev.country,
+                "hosts": ev.hosts,
             }
             continue
 
-        existing = merged[rec.url]
-        existing["guest_count"] = max(existing["guest_count"], rec.guest_count)
-        existing["sources"].add(rec.source)
-        if _parse_iso8601_utc(rec.start_at) < _parse_iso8601_utc(existing["start_at"]):
-            existing["start_at"] = rec.start_at
-            existing["title"] = rec.title
+        existing = merged[ev.url]
+        existing["guest_count"] = max(existing["guest_count"], ev.guest_count)
+        existing["sources"].update(ev.sources)
+        if _parse_iso8601_utc(ev.start_at) < _parse_iso8601_utc(existing["start_at"]):
+            existing["start_at"] = ev.start_at
+            existing["title"] = ev.title
 
-    events: list[Event] = []
+    result: list[Event] = []
     for item in merged.values():
-        events.append(Event(
-            id=item["api_id"],
-            title=item["title"],
-            url=item["url"],
-            start_at=item["start_at"],
-            guest_count=item["guest_count"],
-            sources=sorted(item["sources"]),
-            location_type=item["location_type"],
-            latitude=item["latitude"],
-            longitude=item["longitude"],
-            city=item["city"],
-            region=item["region"],
-            country=item["country"],
-            hosts=[Host.from_dict(h) for h in item["hosts"]],
-        ))
+        item["sources"] = sorted(item["sources"])
+        result.append(Event.model_validate(item))
 
-    return events
+    return result
 
 
 def download_events(
     *, retries: int, start_utc: datetime, end_utc: datetime
 ) -> list[Event]:
     """Fetch events from all configured sources and return deduplicated list."""
-    all_records: list[_EventRecord] = []
+    all_events: list[Event] = []
 
     category_slugs = [_extract_slug(url) for url in HARDCODED_CATEGORY_URLS]
     for slug in category_slugs:
         print(f"Fetching category events: {slug}", file=sys.stderr)
-        all_records.extend(
+        all_events.extend(
             _fetch_category_events(slug, start_utc=start_utc, end_utc=end_utc, retries=retries)
         )
 
@@ -354,7 +327,7 @@ def download_events(
         calendar_api_id = cal.get("calendar_api_id")
         if calendar_api_id:
             print(f"Fetching calendar events: {slug} ({calendar_api_id})", file=sys.stderr)
-            all_records.extend(
+            all_events.extend(
                 _fetch_calendar_events(
                     slug,
                     calendar_api_id=calendar_api_id,
@@ -374,7 +347,7 @@ def download_events(
                 f"Fetching calendar events: {slug} ({resolved_calendar_id})",
                 file=sys.stderr,
             )
-            all_records.extend(
+            all_events.extend(
                 _fetch_calendar_events(
                     slug,
                     calendar_api_id=resolved_calendar_id,
@@ -385,8 +358,92 @@ def download_events(
             )
         else:
             print(f"Fetching discover events via slug fallback: {slug}", file=sys.stderr)
-            all_records.extend(
+            all_events.extend(
                 _fetch_category_events(slug, start_utc=start_utc, end_utc=end_utc, retries=retries)
             )
 
-    return _dedupe_by_url(all_records)
+    return _dedupe_by_url(all_events)
+
+
+# ---------------------------------------------------------------------------
+# ProseMirror → Markdown
+# ---------------------------------------------------------------------------
+
+def _pm_collect_text(node: dict[str, Any]) -> str:
+    """Recursively extract plain text from a ProseMirror node."""
+    node_type = node.get("type", "")
+    if node_type == "text":
+        return node.get("text", "")
+    if node_type == "hard_break":
+        return "\n"
+    parts: list[str] = []
+    for child in node.get("content", []):
+        parts.append(_pm_collect_text(child))
+    return "".join(parts)
+
+
+def _prosemirror_to_markdown(doc: dict[str, Any] | None) -> str:
+    if not doc or not doc.get("content"):
+        return ""
+
+    lines: list[str] = []
+
+    for node in doc["content"]:
+        node_type = node.get("type", "")
+
+        if node_type == "paragraph":
+            lines.append(_pm_collect_text(node))
+            lines.append("")
+
+        elif node_type == "heading":
+            level = node.get("attrs", {}).get("level", 1)
+            prefix = "#" * level
+            lines.append(f"{prefix} {_pm_collect_text(node)}")
+            lines.append("")
+
+        elif node_type == "bullet_list":
+            for item in node.get("content", []):
+                lines.append(f"- {_pm_collect_text(item)}")
+            lines.append("")
+
+        elif node_type == "ordered_list":
+            for idx, item in enumerate(node.get("content", []), start=1):
+                lines.append(f"{idx}. {_pm_collect_text(item)}")
+            lines.append("")
+
+        elif node_type == "horizontal_rule":
+            lines.append("---")
+            lines.append("")
+
+        elif node_type == "hard_break":
+            lines.append("")
+
+    return "\n".join(lines).strip()
+
+
+# ---------------------------------------------------------------------------
+# Single-event detail fetch
+# ---------------------------------------------------------------------------
+
+def fetch_event_detail(event_id: str, *, retries: int = 5) -> EventDetail:
+    """Fetch full details for a single event by its API ID."""
+    url = f"{API_BASE}/event/get?{urllib.parse.urlencode({'event_api_id': event_id})}"
+    data = _get_json(url, web_url="https://luma.com", retries=retries)
+
+    description_md = _prosemirror_to_markdown(data.get("description_mirror"))
+
+    categories = [
+        Category(
+            api_id=cat["api_id"],
+            name=cat.get("name", ""),
+            slug=cat.get("slug", ""),
+        )
+        for cat in data.get("categories", [])
+        if cat.get("api_id")
+    ]
+
+    return EventDetail(
+        event_id=event_id,
+        description_md=description_md,
+        categories=categories,
+    )

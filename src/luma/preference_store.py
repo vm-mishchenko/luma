@@ -51,7 +51,7 @@ class DiskPreferenceProvider:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, list):
-                return [Event.from_dict(d) for d in data]
+                return [Event.model_validate(d) for d in data]
         except (json.JSONDecodeError, OSError, KeyError, TypeError):
             pass
         return []
@@ -60,7 +60,7 @@ class DiskPreferenceProvider:
         self._luma_dir.mkdir(parents=True, exist_ok=True)
         path = self._luma_dir / filename
         with open(path, "w", encoding="utf-8") as f:
-            json.dump([e.to_dict() for e in events], f, indent=2)
+            json.dump([e.model_dump() for e in events], f, indent=2)
 
 
 class MemoryPreferenceProvider:

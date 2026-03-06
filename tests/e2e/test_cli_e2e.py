@@ -74,7 +74,7 @@ def _write_cache(tmp_path, events=None, fetched_at=None):
     path = tmp_path / f"events-{stamp}.json"
     payload = {
         "fetched_at": fetched_at.isoformat(),
-        "events": [e.to_dict() for e in events],
+        "events": [e.model_dump() for e in events],
     }
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return path
@@ -649,7 +649,7 @@ def _write_preferences(luma_dir, filename, events):
     luma_dir.mkdir(parents=True, exist_ok=True)
     path = luma_dir / filename
     path.write_text(
-        json.dumps([e.to_dict() for e in events], indent=2), encoding="utf-8"
+        json.dumps([e.model_dump() for e in events], indent=2), encoding="utf-8"
     )
 
 

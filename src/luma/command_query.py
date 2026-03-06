@@ -280,7 +280,7 @@ def _query(
         "lat": HARDCODED_LAT,
         "lon": HARDCODED_LON,
         "total_events_after_dedupe": result.total_after_filter,
-        "events": [e.to_dict() for e in result.events],
+        "events": [e.model_dump() for e in result.events],
     }
     if args.json_output:
         output["type"] = "query"
@@ -314,13 +314,13 @@ def _agent_query(args: argparse.Namespace, store: EventStore, preferences: "Pref
         build_user_message,
         parse_agent_response,
     )
-    from luma.agent.tools import GetDislikedEventsTool, GetLikedEventsTool, QueryEventsTool
+    from luma.agent.tools import GetDislikedEventsTool, GetEventDetailTool, GetLikedEventsTool, QueryEventsTool
 
     debug = getattr(args, "debug", False)
     params = _build_query_params(args)
     system_prompt = build_system_prompt()
     user_message = build_user_message(args.query_text, params)
-    tools = [QueryEventsTool(store), GetLikedEventsTool(preferences), GetDislikedEventsTool(preferences)]
+    tools = [QueryEventsTool(store), GetLikedEventsTool(preferences), GetDislikedEventsTool(preferences), GetEventDetailTool()]
     agent = Agent(
         system_prompt=system_prompt,
         tools=tools,
@@ -343,14 +343,14 @@ def _agent_query(args: argparse.Namespace, store: EventStore, preferences: "Pref
                 print(f"[debug] {missing} event ID(s) not found in store", file=sys.stderr)
             print(json.dumps({
                 "type": "events",
-                "events": [e.to_dict() for e in events],
+                "events": [e.model_dump() for e in events],
                 "total": len(events),
             }, indent=2))
         elif isinstance(result, QueryParamsResult):
             query_result = store.query(result.params)
             print(json.dumps({
                 "type": "events",
-                "events": [e.to_dict() for e in query_result.events],
+                "events": [e.model_dump() for e in query_result.events],
                 "total": len(query_result.events),
             }, indent=2))
         return 0

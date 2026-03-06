@@ -14,12 +14,14 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Annotated, Any, Literal, Protocol, Union
 
+import contextvars
+
 import anthropic
 import logfire
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from zoneinfo import ZoneInfo
 
-logfire.configure(send_to_logfire=False)
+logfire.configure(send_to_logfire=False, console=False)
 
 from luma.agent.tool import Tool, ToolResult
 from luma.config import (
@@ -385,6 +387,8 @@ class Agent:
                             batch_start : batch_start + AGENT_MAX_PARALLEL_TOOLS
                         ]
 
+                        ctx = contextvars.copy_context()
+
                         def _execute_with_span(block: Any) -> ToolResult:
                             with logfire.span("agent.tool_call") as tool_span:
                                 res = self._execute_tool(block.name, block.input)
@@ -396,7 +400,7 @@ class Agent:
                             max_workers=AGENT_MAX_PARALLEL_TOOLS
                         ) as ex:
                             futures = [
-                                ex.submit(_execute_with_span, block)
+                                ex.submit(ctx.run, _execute_with_span, block)
                                 for block in batch
                             ]
                             for block, future in zip(batch, futures, strict=True):

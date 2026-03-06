@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from luma.agent.agent import AgentQueryParams, _to_query_params
 from luma.agent.tool import ToolResult
 from luma.event_store import CacheError, EventStore, QueryValidationError
+from luma.models import Event
 
 
 class QueryEventsTool:
@@ -22,11 +23,13 @@ class QueryEventsTool:
 
     @property
     def description(self) -> str:
+        props = Event.model_json_schema()["properties"]
         return (
             "Search and filter events from the database. "
             "Returns matching events sorted by the specified criteria. "
             "When you need multiple independent queries (e.g. compare different date ranges), "
-            "include all tool calls in one response."
+            "include all tool calls in one response. "
+            "Returns: " + json.dumps(props)
         )
 
     @property
@@ -45,7 +48,7 @@ class QueryEventsTool:
             params = _to_query_params(agent_params)
             result = self._store.query(params)
             return ToolResult(
-                content=json.dumps([e.to_dict() for e in result.events]),
+                content=json.dumps([e.model_dump() for e in result.events]),
                 is_error=False,
                 metadata={"fetch": True},
             )

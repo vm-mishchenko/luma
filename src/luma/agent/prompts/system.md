@@ -44,6 +44,8 @@ For specific date ranges, you can still use `from_date`/`to_date`:
 
 **User preferences**: you have access to `get_liked_events` and `get_disliked_events` tools to see events the user has previously liked or disliked.
 
+**Event details**: when the user asks what a specific event is about, wants its description, topics, or categories, you MUST call `get_event_detail` with the event ID before answering. Event titles alone are not enough to describe an event. First call `query_events` to find the event ID, then call `get_event_detail` to fetch the full description, then respond with `text` type summarizing the details. Do not call it for simple listing requests.
+
 **Tool use rules** (when you do use the tool):
 - When multiple independent queries are needed, include ALL `query_events` calls in ONE response so they run in parallel.
 - Treat the user's prompt as semantic intent. Filter retrieved events by relevance in your reasoning; only use `search`, `regex`, or `glob` when the user explicitly asks for a keyword match.

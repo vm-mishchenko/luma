@@ -171,3 +171,22 @@ class NoUnnecessaryToolUse(Evaluator):
             return {"no_tool_use": True}
         tool_spans = span_tree.find(lambda s: s.name == "agent.tool_call")
         return {"no_tool_use": len(tool_spans) == 0}
+
+
+@dataclass
+class ToolUsed(Evaluator):
+    """Checks that a specific tool was called at least once."""
+
+    tool_name: str = ""
+
+    def evaluate(self, ctx: EvaluatorContext) -> dict[str, bool]:
+        key = f"used_{self.tool_name}"
+        try:
+            span_tree = ctx.span_tree
+        except Exception:
+            return {key: False}
+        tool_spans = span_tree.find(
+            lambda s: s.name == "agent.tool_call"
+            and s.attributes.get("tool_name") == self.tool_name
+        )
+        return {key: len(tool_spans) > 0}

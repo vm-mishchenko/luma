@@ -2,80 +2,38 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
+from pydantic import BaseModel, Field
 
 
-@dataclass
-class Host:
-    name: str
-    linkedin_handle: str | None = None
-    youtube_handle: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "linkedin_handle": self.linkedin_handle,
-            "youtube_handle": self.youtube_handle,
-        }
-
-    @staticmethod
-    def from_dict(d: dict[str, Any]) -> Host:
-        return Host(
-            name=d["name"],
-            linkedin_handle=d.get("linkedin_handle"),
-            youtube_handle=d.get("youtube_handle"),
-        )
+class Host(BaseModel):
+    name: str = Field(description="Host or organizer name")
+    linkedin_handle: str | None = Field(default=None, description="Host's LinkedIn handle, if available")
+    youtube_handle: str | None = Field(default=None, description="Host's YouTube handle, if available")
 
 
-@dataclass
-class Event:
-    id: str
-    title: str
-    url: str
-    start_at: str
-    guest_count: int
-    sources: list[str] = field(default_factory=list)
-    location_type: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    city: str | None = None
-    region: str | None = None
-    country: str | None = None
-    hosts: list[Host] = field(default_factory=list)
+class Event(BaseModel):
+    id: str = Field(description="Unique Luma event identifier (starts with evt-)")
+    title: str = Field(description="Event title as displayed on Luma")
+    url: str = Field(description="Full URL to the event page on luma.com")
+    start_at: str = Field(description="Event start time in ISO 8601 UTC format")
+    guest_count: int = Field(description="Number of users who RSVP'd to this event")
+    sources: list[str] = Field(default_factory=list, description="Data sources this event was discovered from, e.g. 'category:ai', 'calendar:sf-tech'")
+    location_type: str | None = Field(default=None, description="Whether the event is 'offline' (in-person) or 'online' (virtual)")
+    latitude: float | None = Field(default=None, description="Venue latitude for offline events")
+    longitude: float | None = Field(default=None, description="Venue longitude for offline events")
+    city: str | None = Field(default=None, description="City where the event takes place")
+    region: str | None = Field(default=None, description="State or region where the event takes place")
+    country: str | None = Field(default=None, description="Country where the event takes place")
+    hosts: list[Host] = Field(default_factory=list, description="Event hosts or organizers")
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "title": self.title,
-            "url": self.url,
-            "start_at": self.start_at,
-            "guest_count": self.guest_count,
-            "sources": self.sources,
-            "location_type": self.location_type,
-            "latitude": self.latitude,
-            "longitude": self.longitude,
-            "city": self.city,
-            "region": self.region,
-            "country": self.country,
-            "hosts": [h.to_dict() for h in self.hosts],
-        }
 
-    @staticmethod
-    def from_dict(d: dict[str, Any]) -> Event:
-        hosts_raw = d.get("hosts", [])
-        return Event(
-            id=d["id"],
-            title=d["title"],
-            url=d["url"],
-            start_at=d["start_at"],
-            guest_count=d["guest_count"],
-            sources=d.get("sources", []),
-            location_type=d.get("location_type"),
-            latitude=d.get("latitude"),
-            longitude=d.get("longitude"),
-            city=d.get("city"),
-            region=d.get("region"),
-            country=d.get("country"),
-            hosts=[Host.from_dict(h) for h in hosts_raw],
-        )
+class Category(BaseModel):
+    api_id: str = Field(description="Category identifier, e.g. 'cat-ai'")
+    name: str = Field(description="Display name, e.g. 'AI'")
+    slug: str = Field(description="URL slug, e.g. 'ai'")
+
+
+class EventDetail(BaseModel):
+    event_id: str = Field(description="Luma event ID (starts with evt-)")
+    description_md: str = Field(description="Event description in markdown")
+    categories: list[Category] = Field(description="Event categories")
