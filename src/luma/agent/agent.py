@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import pathlib
 import re
 import sys
@@ -16,7 +15,8 @@ from typing import Annotated, Any, Literal, Protocol, Union
 
 import contextvars
 
-import anthropic
+from any_llm import completion
+
 import logfire
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from zoneinfo import ZoneInfo
@@ -29,13 +29,12 @@ from luma.config import (
     AGENT_MAX_PARALLEL_TOOLS,
     AGENT_MAX_TOKENS,
     AGENT_TOOL_TIMEOUT_SECONDS,
-    ANTHROPIC_API_KEY_ENV,
     DEFAULT_AGENT_MAX_ITERATIONS,
-    DEFAULT_AGENT_MODEL,
     DEFAULT_SORT,
     TIMEZONE_NAME,
 )
 from luma.event_store import QueryParams
+from luma.user_config import LLMConfig
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +247,7 @@ class Agent:
         system_prompt: str,
         tools: list[Tool],
         expected_output: Callable[[Any], AgentResult],
-        model: str = DEFAULT_AGENT_MODEL,
+        llm_config: LLMConfig,
         max_iterations: int = DEFAULT_AGENT_MAX_ITERATIONS,
         debug: bool = False,
     ) -> None:
@@ -257,9 +256,12 @@ class Agent:
         self._tools_schema: list[dict[str, Any]] | None = (
             [
                 {
-                    "name": t.name,
-                    "description": t.description,
-                    "input_schema": t.input_schema,
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.input_schema,
+                    },
                 }
                 for t in tools
             ]
@@ -267,7 +269,7 @@ class Agent:
             else None
         )
         self._expected_output = expected_output
-        self._model = model
+        self._llm_config = llm_config
         self._max_iterations = max_iterations
         self._debug = debug
 
@@ -284,15 +286,10 @@ class Agent:
     ) -> Iterator[AgentOutput]:
         """Yields TextOutput, ToolFetchOutput at any point, FinalResult at the end."""
         with logfire.span("agent.run"):
-            api_key = os.environ.get(ANTHROPIC_API_KEY_ENV)
-            if not api_key:
-                raise AgentError(
-                    f"Environment variable {ANTHROPIC_API_KEY_ENV} is not set. "
-                    "Set it to your Anthropic API key to use the agent."
-                )
-
-            client = anthropic.Anthropic(api_key=api_key)
-            messages: list[dict[str, Any]] = [{"role": "user", "content": text}]
+            messages: list[dict[str, Any]] = [
+                {"role": "system", "content": self._system_prompt},
+                {"role": "user", "content": text},
+            ]
 
             for _ in range(self._max_iterations):
                 if loader and not self._debug:
@@ -300,44 +297,40 @@ class Agent:
                 try:
                     t0 = time.perf_counter()
                     if self._debug:
+                        non_system = [m for m in messages if m.get("role") != "system"]
                         msg_chars = sum(
-                            len(str(m.get("content", ""))) for m in messages
+                            len(str(m.get("content", ""))) for m in non_system
                         )
                         print(
-                            f"[debug] Start LLM call: {len(messages)} messages"
-                            f"(system={len(self._system_prompt)}, messages={msg_chars})",
+                            f"[debug] Start LLM call: {len(messages)} messages "
+                            f"(system={len(self._system_prompt)}, rest={msg_chars})",
                             file=sys.stderr,
                         )
                     with logfire.span("agent.llm_call") as llm_span:
-                        response = self._create_llm_response(
-                            client=client,
-                            messages=messages,
-                        )
-                        llm_span.set_attribute("input_tokens", response.usage.input_tokens)
-                        llm_span.set_attribute("output_tokens", response.usage.output_tokens)
-                        llm_span.set_attribute("model", self._model)
-                        llm_span.set_attribute("stop_reason", response.stop_reason)
+                        response = self._create_llm_response(messages=messages)
+                        llm_span.set_attribute("prompt_tokens", response.usage.prompt_tokens)
+                        llm_span.set_attribute("completion_tokens", response.usage.completion_tokens)
+                        llm_span.set_attribute("model", self._llm_config.model)
+                        llm_span.set_attribute("stop_reason", response.choices[0].finish_reason)
                     if self._debug:
                         elapsed = time.perf_counter() - t0
                         print(
                             f"[debug] End LLM call: {elapsed:.2f}s, {len(messages)} messages",
                             file=sys.stderr,
                         )
-                except anthropic.APIError as exc:
+                except Exception as exc:
                     if loader:
                         loader.stop()
-                    raise AgentError(f"Anthropic API error: {exc}") from exc
+                    raise AgentError(f"LLM API error: {exc}") from exc
                 finally:
                     if loader:
                         loader.stop()
 
-                turn_text = "".join(
-                    block.text
-                    for block in response.content
-                    if hasattr(block, "text")
-                )
+                choice = response.choices[0]
+                turn_text = choice.message.content or ""
+                finish_reason = choice.finish_reason
 
-                if response.stop_reason == "end_turn":
+                if finish_reason == "stop":
                     result = self._parse_response(turn_text)
                     if self._debug:
                         label = type(result).__name__
@@ -347,26 +340,26 @@ class Agent:
                     yield FinalResult(result=result)
                     return
 
-                if response.stop_reason == "tool_use":
+                if finish_reason == "tool_calls":
                     if not self._tools_by_name:
                         raise AgentError(
                             "LLM requested tool use but no tools are configured"
                         )
 
-                    tool_use_blocks = [
-                        block for block in response.content
-                        if block.type == "tool_use"
-                    ]
+                    tool_calls = choice.message.tool_calls or []
                     if self._debug:
-                        for b in tool_use_blocks:
-                            print(f"[debug] tool call: {b.name} {b.input}", file=sys.stderr)
+                        for tc in tool_calls:
+                            print(
+                                f"[debug] tool call: {tc.function.name} {tc.function.arguments}",
+                                file=sys.stderr,
+                            )
 
                     if turn_text.strip():
                         yield TextOutput(text=turn_text.strip())
 
                     counts: dict[str, int] = {}
-                    for b in tool_use_blocks:
-                        counts[b.name] = counts.get(b.name, 0) + 1
+                    for tc in tool_calls:
+                        counts[tc.function.name] = counts.get(tc.function.name, 0) + 1
                     parts: list[str] = []
                     for tool_name, count in counts.items():
                         tool = self._tools_by_name.get(tool_name)
@@ -378,21 +371,22 @@ class Agent:
                     if parts:
                         yield TextOutput(text=f"{', '.join(parts)}...")
 
-                    tool_results = []
+                    tool_results_messages: list[dict[str, Any]] = []
                     executed_results: list[ToolResult] = []
                     for batch_start in range(
-                        0, len(tool_use_blocks), AGENT_MAX_PARALLEL_TOOLS
+                        0, len(tool_calls), AGENT_MAX_PARALLEL_TOOLS
                     ):
-                        batch = tool_use_blocks[
+                        batch = tool_calls[
                             batch_start : batch_start + AGENT_MAX_PARALLEL_TOOLS
                         ]
 
                         ctx = contextvars.copy_context()
 
-                        def _execute_with_span(block: Any) -> ToolResult:
+                        def _execute_with_span(tc: Any) -> ToolResult:
                             with logfire.span("agent.tool_call") as tool_span:
-                                res = self._execute_tool(block.name, block.input)
-                                tool_span.set_attribute("tool_name", block.name)
+                                tool_input = json.loads(tc.function.arguments)
+                                res = self._execute_tool(tc.function.name, tool_input)
+                                tool_span.set_attribute("tool_name", tc.function.name)
                                 tool_span.set_attribute("is_error", res.is_error)
                             return res
 
@@ -400,10 +394,10 @@ class Agent:
                             max_workers=AGENT_MAX_PARALLEL_TOOLS
                         ) as ex:
                             futures = [
-                                ex.submit(ctx.run, _execute_with_span, block)
-                                for block in batch
+                                ex.submit(ctx.run, _execute_with_span, tc)
+                                for tc in batch
                             ]
-                            for block, future in zip(batch, futures, strict=True):
+                            for tc, future in zip(batch, futures, strict=True):
                                 try:
                                     result = future.result(
                                         timeout=AGENT_TOOL_TIMEOUT_SECONDS
@@ -411,18 +405,17 @@ class Agent:
                                 except FuturesTimeoutError:
                                     result = ToolResult(
                                         content=(
-                                            f"Tool {block.name} timed out after "
+                                            f"Tool {tc.function.name} timed out after "
                                             f"{AGENT_TOOL_TIMEOUT_SECONDS}s"
                                         ),
                                         is_error=True,
                                     )
                                 executed_results.append(result)
-                                tool_results.append(
+                                tool_results_messages.append(
                                     {
-                                        "type": "tool_result",
-                                        "tool_use_id": block.id,
+                                        "role": "tool",
+                                        "tool_call_id": tc.id,
                                         "content": result.content,
-                                        "is_error": result.is_error,
                                     }
                                 )
                     fetch_count = sum(
@@ -433,8 +426,23 @@ class Agent:
                     if fetch_count > 0:
                         yield ToolFetchOutput(count=fetch_count)
 
-                    messages.append({"role": "assistant", "content": response.content})
-                    messages.append({"role": "user", "content": tool_results})
+                    assistant_msg: dict[str, Any] = {
+                        "role": "assistant",
+                        "content": turn_text or "",
+                    }
+                    assistant_msg["tool_calls"] = [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in tool_calls
+                    ]
+                    messages.append(assistant_msg)
+                    messages.extend(tool_results_messages)
                     continue
 
             raise AgentError(
@@ -456,25 +464,28 @@ class Agent:
     def _create_llm_response(
         self,
         *,
-        client: anthropic.Anthropic,
         messages: list[dict[str, Any]],
     ) -> Any:
         kwargs: dict[str, Any] = dict(
-            model=self._model,
-            max_tokens=AGENT_MAX_TOKENS,
-            system=self._system_prompt,
+            provider=self._llm_config.provider,
+            model=self._llm_config.model,
             messages=messages,
+            max_tokens=AGENT_MAX_TOKENS,
+            api_key=self._llm_config.api_key,
+            api_base=self._llm_config.api_base,
         )
+        if self._llm_config.reasoning_effort is not None:
+            kwargs["reasoning_effort"] = self._llm_config.reasoning_effort
         if self._tools_schema:
             kwargs["tools"] = self._tools_schema
+        timeout = self._llm_config.timeout or AGENT_LLM_TIMEOUT_SECONDS
         with ThreadPoolExecutor(max_workers=1) as ex:
-            future = ex.submit(client.messages.create, **kwargs)
+            future = ex.submit(completion, **kwargs)
             try:
-                return future.result(timeout=AGENT_LLM_TIMEOUT_SECONDS)
+                return future.result(timeout=timeout)
             except FuturesTimeoutError as exc:
                 raise AgentError(
-                    "LLM response timed out after "
-                    f"{AGENT_LLM_TIMEOUT_SECONDS}s"
+                    f"LLM response timed out after {timeout}s"
                 ) from exc
 
     def _execute_tool(

@@ -22,19 +22,19 @@ run:
 	$(BIN)/luma
 
 eval:
-	$(BIN)/python -m evals.runner $(if $(SET),--set $(SET)) $(if $(TAG),--tag $(TAG)) $(if $(VERBOSE),--verbose)
+	$(BIN)/python -m evals.runner $(if $(SET),--set $(SET)) $(if $(TAG),--tag $(TAG)) $(if $(VERBOSE),--verbose) $(if $(PROVIDER),--provider $(PROVIDER))
 
 eval-all:
-	$(BIN)/python -m evals.runner --all $(if $(TAG),--tag $(TAG)) $(if $(VERBOSE),--verbose)
+	$(BIN)/python -m evals.runner --all $(if $(TAG),--tag $(TAG)) $(if $(VERBOSE),--verbose) $(if $(PROVIDER),--provider $(PROVIDER))
 
 save-baseline:
-	$(BIN)/python -m evals.runner --save-baseline $(if $(SET),--set $(SET)) $(if $(VERBOSE),--verbose)
+	$(BIN)/python -m evals.runner --save-baseline $(if $(SET),--set $(SET)) $(if $(VERBOSE),--verbose) $(if $(PROVIDER),--provider $(PROVIDER))
 
 save-baseline-all:
-	$(BIN)/python -m evals.runner --save-baseline --all $(if $(VERBOSE),--verbose)
+	$(BIN)/python -m evals.runner --save-baseline --all $(if $(VERBOSE),--verbose) $(if $(PROVIDER),--provider $(PROVIDER))
 
 eval-smoke:
-	$(BIN)/python -m evals.runner --all --smoke $(if $(VERBOSE),--verbose)
+	$(BIN)/python -m evals.runner --all --smoke $(if $(VERBOSE),--verbose) $(if $(PROVIDER),--provider $(PROVIDER))
 
 eval-list:
 	$(BIN)/python -m evals.runner --list

@@ -20,6 +20,7 @@ from luma.config import (
 from luma.download import download_events
 from luma.enrich import enrich_events
 from luma.event_store import EventStore
+from luma.user_config import LLMConfig
 
 
 def _window(now_utc: datetime, days: int) -> tuple[datetime, datetime]:
@@ -32,7 +33,7 @@ def _window(now_utc: datetime, days: int) -> tuple[datetime, datetime]:
 
 
 def refresh(
-    *, retries: int, store: EventStore, days: int | None = None
+    *, retries: int, store: EventStore, llm_config: LLMConfig, days: int | None = None
 ) -> tuple[int, pathlib.Path | None]:
     """Fetch all events and save via store. Returns (count, cache_path)."""
     now_utc = datetime.now(timezone.utc)
@@ -44,6 +45,6 @@ def refresh(
         file=sys.stderr,
     )
     events = download_events(retries=retries, start_utc=start_utc, end_utc=end_utc)
-    events = enrich_events(events)
+    events = enrich_events(events, llm_config)
     path = store.save(events, now_utc)
     return len(events), path

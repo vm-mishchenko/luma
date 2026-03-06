@@ -19,6 +19,7 @@ from luma.config import (
 from luma.event_store import CacheError, EventStore, QueryParams
 from luma.models import Event
 from luma.preference_store import PreferenceStore
+from luma.user_config import LLMConfig
 
 _DIM = "\033[2m"
 _RESET = "\033[0m"
@@ -91,7 +92,7 @@ def _build_ranker_message(
     )
 
 
-def run(store: EventStore, preferences: PreferenceStore, *, top: int | None = None) -> int:
+def run(store: EventStore, preferences: PreferenceStore, *, llm_config: LLMConfig, top: int | None = None) -> int:
     has_cache = True
     try:
         result = store.query(QueryParams())
@@ -139,6 +140,7 @@ def run(store: EventStore, preferences: PreferenceStore, *, top: int | None = No
         system_prompt=system_prompt,
         tools=[],
         expected_output=_parse_ranker_response,
+        llm_config=llm_config,
     )
 
     loader = _Loader()

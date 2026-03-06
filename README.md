@@ -9,6 +9,29 @@ A CLI tool that queries and browses Luma events across categories and calendars.
 - Add venv to PATH (printed by `make setup`)
 - Recreate from scratch: `make clean && make setup`
 
+## LLM configuration
+
+Configure your LLM provider in `~/.luma/config.toml`:
+
+```toml
+[llm]
+provider = "anthropic"
+
+[llm.anthropic]
+api_key = "sk-ant-..."
+model = "claude-sonnet-4-20250514"
+
+[llm.ollama]
+host = "http://localhost:11434"
+model = "llama3.1"
+```
+
+Override provider per-command:
+
+```shell
+luma --provider ollama "events this week"
+```
+
 ## Usage
 
 Fetch events from all sources:
@@ -80,6 +103,7 @@ make test
 - `make eval SET=query_command/date_parsing` -- single dataset
 - `make eval-all` -- all datasets sequentially
 - `make eval-all TAG=nature:edge_case` -- filter cases by metadata tag across all datasets
+- `make eval SET=query_command/smoke PROVIDER=ollama` -- run evals with a specific provider
 - `make eval VERBOSE=1` or `make eval-all VERBOSE=1` -- show per-assertion pass/fail reasons
 
 **Baselines**

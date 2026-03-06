@@ -8,7 +8,6 @@ command module (command_query, command_refresh, command_chat).
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -18,7 +17,6 @@ import luma.command_query as command_query
 import luma.command_refresh as command_refresh
 import luma.command_suggest as command_suggest
 from luma.config import (
-    ANTHROPIC_API_KEY_ENV,
     DEFAULT_CACHE_DIR,
     DEFAULT_CONFIG_PATH,
     DEFAULT_LUMA_DIR,
@@ -30,7 +28,7 @@ from luma.event_store import DiskProvider, EventStore
 from luma.preference_store import DiskPreferenceProvider, PreferenceStore
 from luma.user_config import (
     ensure_config,
-    get_api_key,
+    get_llm_config,
     get_shortcuts,
     load_config,
     validate_config,
@@ -235,6 +233,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--json", action="store_true", dest="json_output", help=argparse.SUPPRESS)
     parser.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--config", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--provider", default=None, help=argparse.SUPPRESS)
     subparsers = parser.add_subparsers(dest="command")
     refresh_parser = subparsers.add_parser(
         "refresh",
@@ -252,7 +251,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help=f"Number of days ahead to fetch events (default: {FETCH_WINDOW_DAYS}).",
     )
-    subparsers.add_parser("chat", help=argparse.SUPPRESS)
+    refresh_parser.add_argument("--provider", default=None, help=argparse.SUPPRESS)
+    chat_parser = subparsers.add_parser("chat", help=argparse.SUPPRESS)
+    chat_parser.add_argument("--provider", default=None, help=argparse.SUPPRESS)
     subparsers.add_parser("sc", help=argparse.SUPPRESS)
     like_parser = subparsers.add_parser("like", help=argparse.SUPPRESS)
     _add_query_args(like_parser)
@@ -263,16 +264,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Limit how many suggestions to return (default: 10).",
     )
+    suggest_parser.add_argument("--provider", default=None, help=argparse.SUPPRESS)
     _add_query_args(parser, suppress_help=True)
     for action in parser._subparsers._group_actions:
         action.help = argparse.SUPPRESS
     return _parse_with_query_text(parser, argv)
 
 
-def _extract_global_flags(argv: list[str]) -> tuple[str | None, str | None]:
-    """Scan *argv* for --config and --cache-dir values without modifying it."""
+def _extract_global_flags(argv: list[str]) -> tuple[str | None, str | None, str | None]:
+    """Scan *argv* for --config, --cache-dir, and --provider values without modifying it."""
     config_path: str | None = None
     cache_dir: str | None = None
+    provider: str | None = None
     for i, arg in enumerate(argv):
         if arg == "--config" and i + 1 < len(argv):
             config_path = argv[i + 1]
@@ -282,7 +285,11 @@ def _extract_global_flags(argv: list[str]) -> tuple[str | None, str | None]:
             cache_dir = argv[i + 1]
         elif arg.startswith("--cache-dir="):
             cache_dir = arg.split("=", 1)[1]
-    return config_path, cache_dir
+        elif arg == "--provider" and i + 1 < len(argv):
+            provider = argv[i + 1]
+        elif arg.startswith("--provider="):
+            provider = arg.split("=", 1)[1]
+    return config_path, cache_dir, provider
 
 
 def _resolve_sc(argv: list[str], config: dict, config_path: Path) -> list[str]:
@@ -367,16 +374,12 @@ def main() -> int:
     _load_env_local()
     raw_argv = sys.argv[1:]
 
-    config_path_str, cache_dir_override = _extract_global_flags(raw_argv)
+    config_path_str, cache_dir_override, provider_override = _extract_global_flags(raw_argv)
 
     config_path = Path(config_path_str) if config_path_str else DEFAULT_CONFIG_PATH
     ensure_config(config_path)
     config = load_config(config_path)
     validate_config(config)
-
-    api_key = get_api_key(config)
-    if api_key and not os.environ.get(ANTHROPIC_API_KEY_ENV):
-        os.environ[ANTHROPIC_API_KEY_ENV] = api_key
 
     argv = _resolve_sc(raw_argv, config, config_path)
 
@@ -389,15 +392,19 @@ def main() -> int:
     if args.json_output and args.command in ("refresh", "chat", "like", "suggest"):
         print(f"--json is not supported with '{args.command}'.", file=sys.stderr)
         return 2
+
+    def _llm_config():
+        return get_llm_config(config, provider_override=provider_override)
+
     if args.command == "refresh":
-        return command_refresh.run(args.retries, store, days=args.days)
+        return command_refresh.run(args.retries, store, llm_config=_llm_config(), days=args.days)
     if args.command == "chat":
-        return command_chat.run(store, preferences)
+        return command_chat.run(store, preferences, _llm_config())
     if args.command == "like":
         return command_like.run(args, store, preferences)
     if args.command == "suggest":
-        return command_suggest.run(store, preferences, top=args.top)
-    return command_query.run(args, store, cache_dir, preferences)
+        return command_suggest.run(store, preferences, llm_config=_llm_config(), top=args.top)
+    return command_query.run(args, store, cache_dir, preferences, _llm_config())
 
 
 if __name__ == "__main__":

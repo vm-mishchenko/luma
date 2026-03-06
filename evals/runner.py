@@ -19,9 +19,10 @@ from luma.agent import (
     parse_agent_response,
 )
 from luma.agent.tools import GetDislikedEventsTool, GetEventDetailTool, GetLikedEventsTool, QueryEventsTool
-from luma.config import DEFAULT_AGENT_MODEL
+from luma.config import DEFAULT_CONFIG_PATH
 from luma.event_store import EventStore, MemoryProvider
 from luma.preference_store import MemoryPreferenceProvider, PreferenceStore
+from luma.user_config import LLMConfig, get_llm_config, load_config
 
 from .models import QueryInput
 
@@ -61,7 +62,7 @@ def _load_dataset(name: str):
     return module.dataset
 
 
-def _make_task():
+def _make_task(llm_config: LLMConfig):
     system_prompt = build_system_prompt()
 
     def task(inp: QueryInput) -> AgentResult:
@@ -78,6 +79,7 @@ def _make_task():
             system_prompt=system_prompt,
             tools=tools,
             expected_output=parse_agent_response,
+            llm_config=llm_config,
         )
         return agent.query(user_message)
 
@@ -95,7 +97,7 @@ def _load_env_local() -> None:
 # Baseline: JSON storage + synthetic EvaluationReport reconstruction
 # ---------------------------------------------------------------------------
 
-def _report_to_baseline_json(report, system_prompt: str) -> dict:
+def _report_to_baseline_json(report, system_prompt: str, llm_config: LLMConfig) -> dict:
     """Serialize a report's per-case and aggregate metrics to a JSON-safe dict."""
     prompt_hash = hashlib.md5(system_prompt.encode()).hexdigest()[:8]
 
@@ -118,7 +120,8 @@ def _report_to_baseline_json(report, system_prompt: str) -> dict:
 
     return {
         "prompt_hash": prompt_hash,
-        "model": DEFAULT_AGENT_MODEL,
+        "provider": llm_config.provider,
+        "model": llm_config.model,
         "averages": averages,
         "cases": cases,
     }
@@ -162,10 +165,10 @@ def _baseline_json_to_report(data: dict):
     return EvaluationReport(name=data.get("model", "baseline"), cases=cases)
 
 
-def _save_baseline(dataset_name: str, report, system_prompt: str) -> None:
+def _save_baseline(dataset_name: str, report, system_prompt: str, llm_config: LLMConfig) -> None:
     baseline_path = _USECASE_DIR / f"{dataset_name}.baseline.json"
     baseline_path.parent.mkdir(parents=True, exist_ok=True)
-    data = _report_to_baseline_json(report, system_prompt)
+    data = _report_to_baseline_json(report, system_prompt, llm_config)
     baseline_path.write_text(json.dumps(data, indent=2, default=str))
     print(f"Baseline saved to {baseline_path}")
 
@@ -220,6 +223,7 @@ def _run_eval(
     eval_set: str,
     verbose: bool,
     save_baseline: bool,
+    llm_config: LLMConfig,
     tags: list[tuple[str, str]] | None = None,
 ) -> None:
     system_prompt = build_system_prompt()
@@ -233,15 +237,19 @@ def _run_eval(
             print(f"  (no cases matching [{tag_str}] in {eval_set}, skipping)")
             return
 
-    task = _make_task()
+    task = _make_task(llm_config)
     report = dataset.evaluate_sync(
         task,
-        metadata={"prompt_hash": prompt_hash, "model": DEFAULT_AGENT_MODEL},
+        metadata={
+            "prompt_hash": prompt_hash,
+            "provider": llm_config.provider,
+            "model": llm_config.model,
+        },
     )
 
     if save_baseline:
         report.print(include_reasons=True)
-        _save_baseline(eval_set, report, system_prompt)
+        _save_baseline(eval_set, report, system_prompt, llm_config)
     else:
         if verbose:
             report.print(include_reasons=True)
@@ -283,7 +291,15 @@ def main() -> int:
         metavar="KEY:VALUE",
         help="Filter cases by metadata tag (repeatable, e.g. --tag nature:edge_case)",
     )
+    parser.add_argument(
+        "--provider",
+        default=None,
+        help="Override the LLM provider (e.g. 'ollama')",
+    )
     args = parser.parse_args()
+
+    config = load_config(DEFAULT_CONFIG_PATH)
+    llm_config = get_llm_config(config, provider_override=args.provider)
 
     tags: list[tuple[str, str]] = []
     if args.smoke:
@@ -312,11 +328,11 @@ def main() -> int:
             print(f"\n=== Running: {eval_set} ===")
             print(f"    make eval SET={eval_set}")
             print(f"    make eval SET={eval_set} VERBOSE=1")
-            _run_eval(eval_set, args.verbose, args.save_baseline, tags=tags or None)
+            _run_eval(eval_set, args.verbose, args.save_baseline, llm_config, tags=tags or None)
         return 0
 
     eval_set = args.eval_set or "query_command/smoke"
-    _run_eval(eval_set, args.verbose, args.save_baseline, tags=tags or None)
+    _run_eval(eval_set, args.verbose, args.save_baseline, llm_config, tags=tags or None)
     return 0
 
 

@@ -80,6 +80,16 @@ def _write_cache(tmp_path, events=None, fetched_at=None):
     return path
 
 
+_LLM_CONFIG_BLOCK = """\
+[llm]
+provider = "anthropic"
+
+[llm.anthropic]
+api_key = "sk-ant-test"
+model = "claude-sonnet-4-20250514"
+"""
+
+
 def _write_config(tmp_path, content: str = "") -> pathlib.Path:
     """Write a TOML config string to a temp file and return the path."""
     path = tmp_path / "config.toml"
@@ -446,7 +456,7 @@ def test_no_config_auto_creates(tmp_path, capsys):
 
 
 def test_valid_config_loads(tmp_path, capsys):
-    cfg = _write_config(tmp_path, 'api_key = "sk-test-123"\n')
+    cfg = _write_config(tmp_path, _LLM_CONFIG_BLOCK)
     _write_cache(tmp_path)
     rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path)])
     assert rc == 0
@@ -467,7 +477,7 @@ def test_malformed_toml_exits_2(tmp_path, capsys):
 def test_sc_runs_shortcut(tmp_path, capsys):
     cfg = _write_config(
         tmp_path,
-        '[shortcuts]\npopular = ["--sort", "guest", "--min-guest", "100"]\n',
+        _LLM_CONFIG_BLOCK + '[shortcuts]\npopular = ["--sort", "guest", "--min-guest", "100"]\n',
     )
     _write_cache(tmp_path)
     rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "sc", "popular"])
@@ -480,7 +490,7 @@ def test_sc_runs_shortcut(tmp_path, capsys):
 def test_sc_override_with_cli(tmp_path, capsys):
     cfg = _write_config(
         tmp_path,
-        '[shortcuts]\nby-guest = ["--sort", "guest"]\n',
+        _LLM_CONFIG_BLOCK + '[shortcuts]\nby-guest = ["--sort", "guest"]\n',
     )
     _write_cache(tmp_path)
     rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "sc", "by-guest", "--top", "1"])

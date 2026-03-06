@@ -7,19 +7,16 @@ Pass 2+3: LLM inference for zero-data events and gap-filling after Nominatim.
 from __future__ import annotations
 
 import json
-import os
 import pathlib
 import re
 import sys
 import time
 import urllib.parse
 
-import anthropic
+from any_llm import completion
 
 from luma.config import (
     AGENT_MAX_TOKENS,
-    ANTHROPIC_API_KEY_ENV,
-    DEFAULT_AGENT_MODEL,
     LLM_ENRICH_BATCH_SIZE,
     NOMINATIM_BASE_URL,
     NOMINATIM_DELAY_SEC,
@@ -27,6 +24,7 @@ from luma.config import (
 )
 from luma.download import _request_with_retry
 from luma.models import Event
+from luma.user_config import LLMConfig
 
 from dataclasses import replace
 
@@ -308,7 +306,7 @@ def _has_any_location(event: Event) -> bool:
 
 
 def _llm_call(
-    client: anthropic.Anthropic,
+    llm_config: LLMConfig,
     candidates: list[tuple[int, Event, list[str]]],
     description: str,
     result_events: list[Event],
@@ -328,12 +326,15 @@ def _llm_call(
         )
         prompt = _build_llm_prompt(batch)
         try:
-            response = client.messages.create(
-                model=DEFAULT_AGENT_MODEL,
-                max_tokens=AGENT_MAX_TOKENS,
+            response = completion(
+                provider=llm_config.provider,
+                model=llm_config.model,
                 messages=[{"role": "user", "content": prompt}],
+                max_tokens=AGENT_MAX_TOKENS,
+                api_key=llm_config.api_key,
+                api_base=llm_config.api_base,
             )
-            text = response.content[0].text
+            text = response.choices[0].message.content
             parsed = _parse_llm_response(text)
             idx_to_batch = {entry[0]: entry for entry in batch}
             for item in parsed:
@@ -358,11 +359,7 @@ def _llm_call(
     return enriched
 
 
-def _enrich_llm(events: list[Event]) -> tuple[list[Event], int]:
-    api_key = os.environ.get(ANTHROPIC_API_KEY_ENV)
-    if not api_key:
-        return events, 0
-
+def _enrich_llm(events: list[Event], llm_config: LLMConfig) -> tuple[list[Event], int]:
     gap_fill: list[tuple[int, Event, list[str]]] = []
     zero_data: list[tuple[int, Event, list[str]]] = []
     for i, ev in enumerate(events):
@@ -380,15 +377,14 @@ def _enrich_llm(events: list[Event]) -> tuple[list[Event], int]:
         return events, 0
 
     result_events = list(events)
-    client = anthropic.Anthropic(api_key=api_key)
 
     filled = _llm_call(
-        client, gap_fill,
+        llm_config, gap_fill,
         "Filling gaps left after geocoding via LLM",
         result_events,
     )
     inferred = _llm_call(
-        client, zero_data,
+        llm_config, zero_data,
         "Inferring location from title and sources via LLM",
         result_events,
     )
@@ -400,7 +396,7 @@ def _enrich_llm(events: list[Event]) -> tuple[list[Event], int]:
 # Public API
 # ---------------------------------------------------------------------------
 
-def enrich_events(events: list[Event]) -> list[Event]:
+def enrich_events(events: list[Event], llm_config: LLMConfig) -> list[Event]:
     """Enrich events with missing location data via Nominatim and LLM."""
     candidates = [ev for ev in events if _is_candidate(ev)]
     if not candidates:
@@ -409,7 +405,7 @@ def enrich_events(events: list[Event]) -> list[Event]:
     needed = len(candidates)
     print(f"Enriching {needed} events with missing location data", file=sys.stderr)
     events, geocoded = _enrich_nominatim(events)
-    events, inferred = _enrich_llm(events)
+    events, inferred = _enrich_llm(events, llm_config)
 
     unresolved = needed - geocoded - inferred
     print(

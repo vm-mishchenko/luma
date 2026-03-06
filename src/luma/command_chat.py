@@ -15,6 +15,7 @@ from luma.agent import (
 from luma.agent.tools import GetDislikedEventsTool, GetLikedEventsTool, QueryEventsTool
 from luma.event_store import EventStore
 from luma.preference_store import PreferenceStore
+from luma.user_config import LLMConfig
 
 
 class _Spinner:
@@ -49,7 +50,7 @@ class _Spinner:
         print("\r  \r", end="", flush=True)
 
 
-def run(store: EventStore, preferences: PreferenceStore) -> int:
+def run(store: EventStore, preferences: PreferenceStore, llm_config: LLMConfig) -> int:
     print("luma chat (Ctrl+D to exit)")
     system_prompt = build_system_prompt()
     tools = [QueryEventsTool(store), GetLikedEventsTool(preferences), GetDislikedEventsTool(preferences)]
@@ -57,6 +58,7 @@ def run(store: EventStore, preferences: PreferenceStore) -> int:
         system_prompt=system_prompt,
         tools=tools,
         expected_output=parse_agent_response,
+        llm_config=llm_config,
     )
     history: list[dict[str, str]] = []
 

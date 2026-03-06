@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 if TYPE_CHECKING:
     from luma.preference_store import PreferenceStore
+    from luma.user_config import LLMConfig
 
 from luma.config import (
     DEFAULT_WINDOW_DAYS,
@@ -301,7 +302,7 @@ def _query(
     return 0
 
 
-def _agent_query(args: argparse.Namespace, store: EventStore, preferences: "PreferenceStore") -> int:
+def _agent_query(args: argparse.Namespace, store: EventStore, preferences: "PreferenceStore", llm_config: "LLMConfig") -> int:
     from luma.agent import (
         Agent,
         AgentError,
@@ -325,6 +326,7 @@ def _agent_query(args: argparse.Namespace, store: EventStore, preferences: "Pref
         system_prompt=system_prompt,
         tools=tools,
         expected_output=parse_agent_response,
+        llm_config=llm_config,
         debug=debug,
     )
 
@@ -394,7 +396,8 @@ def run(
     store: EventStore,
     cache_dir: pathlib.Path,
     preferences: "PreferenceStore",
+    llm_config: "LLMConfig",
 ) -> int:
     if args.query_text:
-        return _agent_query(args, store, preferences)
+        return _agent_query(args, store, preferences, llm_config)
     return _query(args, store, cache_dir)
