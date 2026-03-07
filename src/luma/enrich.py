@@ -26,7 +26,6 @@ from luma.download import _request_with_retry
 from luma.models import Event
 from luma.user_config import LLMConfig
 
-from dataclasses import replace
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +144,7 @@ def _apply_result(event: Event, result: dict) -> Event:
             changes[fld] = result[fld]
     if not changes:
         return event
-    return replace(event, **changes)
+    return event.model_copy(update=changes)
 
 
 _GEOCODE_CACHE_PATH = pathlib.Path.home() / ".luma" / "coordinates-to-city.json"
