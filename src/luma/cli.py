@@ -24,10 +24,11 @@ from luma.config import (
     DEFAULT_SORT,
     FETCH_WINDOW_DAYS,
 )
-from luma.event_store import DiskProvider, EventStore
+from luma.event_store import EventStore
 from luma.preference_store import DiskPreferenceProvider, PreferenceStore
 from luma.user_config import (
     ensure_config,
+    get_event_provider,
     get_llm_config,
     get_shortcuts,
     load_config,
@@ -387,7 +388,7 @@ def main() -> int:
     cache_dir = (
         Path(args.cache_dir).expanduser() if args.cache_dir else DEFAULT_CACHE_DIR
     )
-    store = EventStore(DiskProvider(cache_dir=cache_dir))
+    store = EventStore(get_event_provider(config, cache_dir))
     preferences = PreferenceStore(DiskPreferenceProvider(DEFAULT_LUMA_DIR))
     if args.json_output and args.command in ("refresh", "chat", "like", "suggest"):
         print(f"--json is not supported with '{args.command}'.", file=sys.stderr)

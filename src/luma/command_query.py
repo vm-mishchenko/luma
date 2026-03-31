@@ -237,17 +237,6 @@ def _query(
         else:
             print("No seen events to clear.", file=sys.stderr)
 
-    staleness = store.check_staleness()
-    if staleness.is_stale:
-        age_days = staleness.age.days
-        if age_days >= 1:
-            print(f"Warning: cache is {age_days} day{'s' if age_days != 1 else ''} old. "
-                  "Run 'luma refresh' to update.", file=sys.stderr)
-        else:
-            age_hours = int(staleness.age.total_seconds() // 3600)
-            print(f"Warning: cache is {age_hours} hours old. "
-                  "Run 'luma refresh' to update.", file=sys.stderr)
-
     seen_urls = _load_seen_urls(cache_dir)
 
     params = _build_query_params(args)

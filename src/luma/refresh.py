@@ -6,7 +6,6 @@ to ``download.download_events``; storage is delegated to ``EventStore``.
 
 from __future__ import annotations
 
-import pathlib
 import sys
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -34,8 +33,8 @@ def _window(now_utc: datetime, days: int) -> tuple[datetime, datetime]:
 
 def refresh(
     *, retries: int, store: EventStore, llm_config: LLMConfig, days: int | None = None
-) -> tuple[int, pathlib.Path | None]:
-    """Fetch all events and save via store. Returns (count, cache_path)."""
+) -> int:
+    """Fetch all events and upsert into store. Returns fetch count."""
     now_utc = datetime.now(timezone.utc)
     window_days = days or FETCH_WINDOW_DAYS
     start_utc, end_utc = _window(now_utc, days=window_days)
@@ -46,5 +45,5 @@ def refresh(
     )
     events = download_events(retries=retries, start_utc=start_utc, end_utc=end_utc)
     events = enrich_events(events, llm_config)
-    path = store.save(events, now_utc)
-    return len(events), path
+    store.upsert(events)
+    return len(events)

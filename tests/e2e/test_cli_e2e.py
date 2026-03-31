@@ -64,19 +64,12 @@ SAMPLE_EVENTS = [
 ]
 
 
-def _write_cache(tmp_path, events=None, fetched_at=None):
+def _write_cache(tmp_path, events=None):
     """Write a minimal cache file directly into *tmp_path*."""
-    if fetched_at is None:
-        fetched_at = datetime.now(timezone.utc)
     if events is None:
         events = SAMPLE_EVENTS
-    stamp = fetched_at.strftime("%Y-%m-%d_%H-%M-%S")
-    path = tmp_path / f"events-{stamp}.json"
-    payload = {
-        "fetched_at": fetched_at.isoformat(),
-        "events": [e.model_dump() for e in events],
-    }
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    path = tmp_path / "events.json"
+    path.write_text(json.dumps([e.model_dump() for e in events], indent=2), encoding="utf-8")
     return path
 
 
@@ -135,10 +128,8 @@ def test_refresh_success(tmp_path, capsys):
         rc = _run_cli(["--cache-dir", str(tmp_path), "refresh"])
     assert rc == 0
     err = capsys.readouterr().err
-    assert "Cached 3 events" in err
-
-    cache_files = list(tmp_path.glob("events-*.json"))
-    assert len(cache_files) == 1
+    assert "Fetched 3 events" in err
+    assert (tmp_path / "events.json").is_file()
 
 
 def test_refresh_network_error(tmp_path, capsys):
@@ -153,15 +144,6 @@ def test_query_with_cache(tmp_path, capsys):
     rc = _run_cli(["--cache-dir", str(tmp_path), "--min-guest", "0"])
     assert rc == 0
     assert "Top" in capsys.readouterr().out
-
-
-def test_stale_cache_warns(tmp_path, capsys):
-    stale_time = datetime.now(timezone.utc) - timedelta(days=3)
-    _write_cache(tmp_path, fetched_at=stale_time)
-    rc = _run_cli(["--cache-dir", str(tmp_path), "--min-guest", "0"])
-    assert rc == 0
-    err = capsys.readouterr().err
-    assert "Run 'luma refresh'" in err
 
 
 def test_refresh_retries_forwarded(tmp_path):

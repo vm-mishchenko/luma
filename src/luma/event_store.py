@@ -20,12 +20,10 @@ from pydantic import BaseModel, Field
 from zoneinfo import ZoneInfo
 
 from luma.config import (
-    CACHE_STALE_HOURS,
     DEFAULT_SEARCH_RADIUS_MILES,
     DEFAULT_SORT,
     DEFAULT_WINDOW_DAYS,
-    EVENTS_CACHE_GLOB,
-    EVENTS_FILENAME_PREFIX,
+    EVENTS_FILENAME,
     TIMEZONE_NAME,
 )
 from luma.models import Event
@@ -70,12 +68,6 @@ class QueryParams(BaseModel):
     search_lat: float | None = Field(None, description="Latitude of search center for proximity filter. Requires search_lon. Mutually exclusive with city.")
     search_lon: float | None = Field(None, description="Longitude of search center for proximity filter. Requires search_lat. Mutually exclusive with city.")
     search_radius_miles: float | None = Field(None, description="Search radius in miles. Requires search_lat and search_lon.")
-
-
-@dataclass
-class CacheInfo:
-    is_stale: bool
-    age: timedelta
 
 
 @dataclass
@@ -191,63 +183,48 @@ def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> floa
 
 class EventProvider(Protocol):
     def load(self) -> list[Event]: ...
-    def save(self, events: list[Event], fetched_at: datetime) -> pathlib.Path | None: ...
-    def check_staleness(self) -> CacheInfo: ...
+    def upsert(self, events: list[Event]) -> None: ...
 
 
 class DiskProvider:
-    """Reads and writes events as JSON cache files on disk."""
+    """Reads and writes events as a single JSON file on disk."""
 
     def __init__(self, cache_dir: pathlib.Path) -> None:
         self._cache_dir = cache_dir
 
+    @property
+    def _cache_path(self) -> pathlib.Path:
+        return self._cache_dir / EVENTS_FILENAME
+
     def load(self) -> list[Event]:
-        path = self._find_latest_cache()
-        if path is None:
+        path = self._cache_path
+        if not path.is_file():
             raise CacheError("No cached events. Run 'luma refresh' first.")
-        return self._load_cache(path)
-
-    def save(self, events: list[Event], fetched_at: datetime) -> pathlib.Path:
-        self._cache_dir.mkdir(parents=True, exist_ok=True)
-        stamp = fetched_at.strftime("%Y-%m-%d_%H-%M-%S")
-        filename = f"{EVENTS_FILENAME_PREFIX}{stamp}.json"
-        payload = {
-            "fetched_at": fetched_at.isoformat(),
-            "events": [e.model_dump() for e in events],
-        }
-        path = self._cache_dir / filename
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2)
-        return path
-
-    def check_staleness(self) -> CacheInfo:
-        path = self._find_latest_cache()
-        if path is None:
-            return CacheInfo(is_stale=False, age=timedelta(0))
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            fetched_at = parse_iso8601_utc(data["fetched_at"])
-        except (json.JSONDecodeError, KeyError, OSError, ValueError):
-            return CacheInfo(is_stale=False, age=timedelta(0))
-        age = datetime.now(timezone.utc) - fetched_at
-        return CacheInfo(is_stale=age > timedelta(hours=CACHE_STALE_HOURS), age=age)
-
-    def _find_latest_cache(self) -> pathlib.Path | None:
-        if not self._cache_dir.is_dir():
-            return None
-        candidates = sorted(self._cache_dir.glob(EVENTS_CACHE_GLOB), reverse=True)
-        if not candidates:
-            return None
-        return candidates[0]
-
-    def _load_cache(self, path: pathlib.Path) -> list[Event]:
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return [Event.model_validate(d) for d in data["events"]]
+            return [Event.model_validate(d) for d in data]
         except (json.JSONDecodeError, KeyError, OSError) as err:
             raise CacheError(f"Cannot read cache file {path}: {err}") from err
+
+    def upsert(self, events: list[Event]) -> None:
+        self._cache_dir.mkdir(parents=True, exist_ok=True)
+        existing: list[Event] = []
+        if self._cache_path.is_file():
+            try:
+                existing = self.load()
+            except CacheError:
+                existing = []
+        merged = {e.id: e for e in existing}
+        for e in events:
+            merged[e.id] = e
+        sorted_events = sorted(
+            merged.values(),
+            key=lambda e: parse_iso8601_utc(e.start_at),
+            reverse=True,
+        )
+        with open(self._cache_path, "w", encoding="utf-8") as f:
+            json.dump([e.model_dump() for e in sorted_events], f, indent=2)
 
 
 class MemoryProvider:
@@ -259,12 +236,15 @@ class MemoryProvider:
     def load(self) -> list[Event]:
         return self._events
 
-    def save(self, events: list[Event], fetched_at: datetime) -> None:
-        self._events = events
-        return None
-
-    def check_staleness(self) -> CacheInfo:
-        return CacheInfo(is_stale=False, age=timedelta(0))
+    def upsert(self, events: list[Event]) -> None:
+        merged = {e.id: e for e in self._events}
+        for e in events:
+            merged[e.id] = e
+        self._events = sorted(
+            merged.values(),
+            key=lambda e: parse_iso8601_utc(e.start_at),
+            reverse=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +255,7 @@ class EventStore:
     """Database-like abstraction over event storage.
 
     Provider binding is fixed after construction.  Callers interact only with
-    ``query()``, ``save()``, and ``check_staleness()``.
+    ``query()`` and ``upsert()``.
     """
 
     def __init__(self, provider: EventProvider) -> None:
@@ -295,11 +275,8 @@ class EventStore:
         index = {e.id: e for e in events}
         return [index[eid] for eid in dict.fromkeys(ids) if eid in index]
 
-    def save(self, events: list[Event], fetched_at: datetime) -> pathlib.Path | None:
-        return self._provider.save(events, fetched_at)
-
-    def check_staleness(self) -> CacheInfo:
-        return self._provider.check_staleness()
+    def upsert(self, events: list[Event]) -> None:
+        self._provider.upsert(events)
 
 
 # ---------------------------------------------------------------------------

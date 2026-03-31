@@ -22,6 +22,12 @@ model = "claude-sonnet-4-20250514"
 # model = "llama3.1"
 # timeout = 120
 
+# [storage]
+# provider = "mongo"
+# [storage.mongo]
+# connection_string = "mongodb://localhost:27017"
+# database = "luma"
+
 # Shortcuts: named queries callable via 'luma sc <name>'
 # Each shortcut is an array of CLI arguments.
 # Example:
@@ -99,6 +105,27 @@ def validate_config(config: dict) -> None:
             if isinstance(val, dict):
                 continue
 
+    storage = config.get("storage")
+    if storage is not None:
+        if not isinstance(storage, dict):
+            print("Error: [storage] must be a table.", file=sys.stderr)
+            raise SystemExit(2)
+        sp = storage.get("provider")
+        if sp is not None and not isinstance(sp, str):
+            print("Error: [storage].provider must be a string.", file=sys.stderr)
+            raise SystemExit(2)
+        if sp == "mongo":
+            mongo = storage.get("mongo")
+            if not mongo or not isinstance(mongo, dict):
+                print("Error: [storage.mongo] section required when provider = \"mongo\".", file=sys.stderr)
+                raise SystemExit(2)
+            if not isinstance(mongo.get("connection_string"), str):
+                print("Error: Set connection_string in [storage.mongo].", file=sys.stderr)
+                raise SystemExit(2)
+            if not isinstance(mongo.get("database"), str):
+                print("Error: Set database in [storage.mongo].", file=sys.stderr)
+                raise SystemExit(2)
+
 
 def get_llm_config(config: dict, provider_override: str | None = None) -> LLMConfig:
     """Build LLMConfig from [llm] section in config."""
@@ -148,6 +175,27 @@ def get_llm_config(config: dict, provider_override: str | None = None) -> LLMCon
         timeout=timeout,
         reasoning_effort=reasoning_effort,
     )
+
+
+def get_event_provider(config: dict, cache_dir: pathlib.Path):
+    """Build an EventProvider from [storage] section in config."""
+    from luma.event_store import DiskProvider
+
+    storage = config.get("storage")
+    if not storage or storage.get("provider", "disk") == "disk":
+        return DiskProvider(cache_dir)
+
+    if storage["provider"] == "mongo":
+        from pymongo import MongoClient
+
+        from luma.mongo_provider import MongoEventProvider
+
+        mongo = storage["mongo"]
+        client = MongoClient(mongo["connection_string"])
+        return MongoEventProvider(client[mongo["database"]])
+
+    print(f"Error: Unknown storage provider '{storage['provider']}'.", file=sys.stderr)
+    raise SystemExit(2)
 
 
 def get_shortcuts(config: dict) -> dict[str, list[str]]:
