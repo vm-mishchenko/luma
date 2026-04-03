@@ -30,12 +30,23 @@ from luma.models import Event
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _sample_start(minutes_ahead: int) -> str:
+    """Return an ISO timestamp *minutes_ahead* from now, clamped to today in LA."""
+    from zoneinfo import ZoneInfo
+    la = ZoneInfo("America/Los_Angeles")
+    now_la = datetime.now(la)
+    candidate = now_la + timedelta(minutes=minutes_ahead)
+    if candidate.date() != now_la.date():
+        candidate = now_la.replace(hour=23, minute=59, second=0, microsecond=0)
+    return candidate.astimezone(timezone.utc).isoformat()
+
+
 SAMPLE_EVENTS = [
     Event(
         id="evt-test1",
         title="AI Meetup",
         url="https://luma.com/ai-meetup",
-        start_at=(datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+        start_at=_sample_start(10),
         guest_count=120,
         sources=["category:ai"],
         city="San Francisco",
@@ -49,7 +60,7 @@ SAMPLE_EVENTS = [
         id="evt-test2",
         title="Tech Talk",
         url="https://luma.com/tech-talk",
-        start_at=(datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
+        start_at=_sample_start(20),
         guest_count=80,
         sources=["category:tech"],
     ),
@@ -57,7 +68,7 @@ SAMPLE_EVENTS = [
         id="evt-test3",
         title="Small Event",
         url="https://luma.com/small-event",
-        start_at=(datetime.now(timezone.utc) + timedelta(days=3)).isoformat(),
+        start_at=_sample_start(30),
         guest_count=10,
         sources=["category:tech"],
     ),

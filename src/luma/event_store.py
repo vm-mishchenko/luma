@@ -203,6 +203,8 @@ class DiskProvider:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+            if isinstance(data, dict):
+                data = data.get("events", [])
             return [Event.model_validate(d) for d in data]
         except (json.JSONDecodeError, KeyError, OSError) as err:
             raise CacheError(f"Cannot read cache file {path}: {err}") from err
