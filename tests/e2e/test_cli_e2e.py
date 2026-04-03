@@ -805,6 +805,105 @@ def test_inline_mixed_like_and_dislike(tmp_path, capsys, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Query subcommand tests
+# ---------------------------------------------------------------------------
+
+
+SAMPLE_EVENTS_WITH_ZERO = SAMPLE_EVENTS + [
+    Event(
+        id="evt-test-zero",
+        title="Zero Guest Event",
+        url="https://luma.com/zero-guest",
+        start_at=_sample_start(40),
+        guest_count=0,
+        sources=["category:tech"],
+    ),
+]
+
+
+def test_query_subcommand_with_cache(tmp_path, capsys):
+    _write_cache(tmp_path)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "query", "--min-guest", "0"])
+    assert rc == 0
+    assert "Top" in capsys.readouterr().out
+
+
+def test_query_subcommand_no_cache(tmp_path, capsys):
+    rc = _run_cli(["--cache-dir", str(tmp_path), "query"])
+    assert rc == 1
+    assert "No cached events" in capsys.readouterr().err
+
+
+def test_query_subcommand_free_text(tmp_path, capsys):
+    from luma.agent.agent import FinalResult, TextResult
+
+    def _mock_query_iter(*args, **kwargs):
+        yield FinalResult(result=TextResult(text="Here are your events."))
+
+    with mock.patch("luma.agent.agent.Agent.query_iter", side_effect=_mock_query_iter):
+        rc = _run_cli(["--cache-dir", str(tmp_path), "query", "hello"])
+    assert rc == 0
+    assert "Here are your events." in capsys.readouterr().out
+
+
+def test_query_subcommand_with_json(tmp_path, capsys):
+    _write_cache(tmp_path)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--json", "query", "--min-guest", "0"])
+    assert rc == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["type"] == "query"
+    assert len(data["events"]) > 0
+
+
+def test_query_subcommand_filters(tmp_path, capsys):
+    _write_cache(tmp_path)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "query", "--city", "San Francisco"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "AI Meetup" in out
+    assert "Tech Talk" not in out
+
+
+def test_query_subcommand_discard(tmp_path, capsys):
+    _write_cache(tmp_path)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "query", "--discard", "--min-guest", "0"])
+    assert rc == 0
+    seen_path = tmp_path / "seen.json"
+    assert seen_path.is_file()
+    seen = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert len(seen) > 0
+
+
+def test_bare_form_default_min_guest(tmp_path, capsys):
+    _write_cache(tmp_path, events=SAMPLE_EVENTS_WITH_ZERO)
+    rc = _run_cli(["--cache-dir", str(tmp_path)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Zero Guest Event" not in out
+
+
+def test_bare_form_min_guest_override(tmp_path, capsys):
+    _write_cache(tmp_path, events=SAMPLE_EVENTS_WITH_ZERO)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--min-guest", "0"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Zero Guest Event" in out
+
+
+def test_query_subcommand_no_default_min_guest(tmp_path, capsys):
+    _write_cache(tmp_path, events=SAMPLE_EVENTS_WITH_ZERO)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "query"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Zero Guest Event" in out
+
+
+# ---------------------------------------------------------------------------
+# Suggest tests
+# ---------------------------------------------------------------------------
+
+
 def test_suggest_no_cache(tmp_path, capsys, monkeypatch):
     luma_dir = tmp_path / "luma"
     monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)

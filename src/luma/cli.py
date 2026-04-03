@@ -180,111 +180,118 @@ def _load_env_local() -> None:
     load_dotenv(env_file, override=False)
 
 
-def _add_query_args(parser: argparse.ArgumentParser) -> None:
-    """Register query-related flags on *parser*."""
+def _add_query_args(parser: argparse.ArgumentParser, *, hidden: bool = False) -> None:
+    """Register query-related flags on *parser*.
+
+    When *hidden* is True the flags are still functional but suppressed from
+    ``--help`` output (used on the main parser to keep top-level help clean).
+    """
+    def _h(text: str) -> str:
+        return argparse.SUPPRESS if hidden else text
+
     parser.add_argument(
         "--days", type=int, default=None,
-        help="Time window in days from now (default: 1, today only). Mutually exclusive with --from-date/--to-date.",
+        help=_h("Time window in days from now (default: 1, today only). Mutually exclusive with --from-date/--to-date."),
     )
     parser.add_argument(
         "--from-date", default=None, metavar="YYYYMMDD",
-        help="Start date for the event window (inclusive). Mutually exclusive with --days.",
+        help=_h("Start date for the event window (inclusive). Mutually exclusive with --days."),
     )
     parser.add_argument(
         "--to-date", default=None, metavar="YYYYMMDD",
-        help="End date for the event window (inclusive). Mutually exclusive with --days.",
+        help=_h("End date for the event window (inclusive). Mutually exclusive with --days."),
     )
     parser.add_argument(
         "--range", default=None, dest="range",
-        help="Predefined date range: today, tomorrow, week[+N], weekday[+N], weekend[+N].",
+        help=_h("Predefined date range: today, tomorrow, week[+N], weekday[+N], weekend[+N]."),
     )
     parser.add_argument(
         "--top", type=int, default=None,
-        help="Limit how many events to print after sorting (default: all).",
+        help=_h("Limit how many events to print after sorting (default: all)."),
     )
     parser.add_argument(
         "--sort", choices=["date", "guest"], default=DEFAULT_SORT,
-        help="Sort by event 'date' or by 'guest' (default).",
+        help=_h("Sort by event 'date' or by 'guest' (default)."),
     )
     parser.add_argument(
         "--min-guest", type=int, default=None,
-        help="Minimum guest_count to include.",
+        help=_h("Minimum guest_count to include."),
     )
     parser.add_argument(
         "--max-guest", type=int, default=None,
-        help="Maximum guest_count to include (default: no limit).",
+        help=_h("Maximum guest_count to include (default: no limit)."),
     )
     parser.add_argument(
         "--min-time", type=int, default=None, metavar="HOUR_0_23",
-        help="Minimum event start hour in Los Angeles time (0-23). Example: 18.",
+        help=_h("Minimum event start hour in Los Angeles time (0-23). Example: 18."),
     )
     parser.add_argument(
         "--max-time", type=int, default=None, metavar="HOUR_0_23",
-        help="Maximum event start hour in Los Angeles time (0-23). Example: 21.",
+        help=_h("Maximum event start hour in Los Angeles time (0-23). Example: 21."),
     )
     parser.add_argument(
         "--day", default=None,
-        help="Comma-separated weekday filter (e.g. 'Tue,Thu'). Case-insensitive.",
+        help=_h("Comma-separated weekday filter (e.g. 'Tue,Thu'). Case-insensitive."),
     )
     parser.add_argument(
         "--exclude", default=None,
-        help="Comma-separated keywords to exclude from titles (case-insensitive).",
+        help=_h("Comma-separated keywords to exclude from titles (case-insensitive)."),
     )
     parser.add_argument(
         "--search", default=None,
-        help="Only show events whose title contains this keyword (case-insensitive). Mutually exclusive with --regex/--glob.",
+        help=_h("Only show events whose title contains this keyword (case-insensitive). Mutually exclusive with --regex/--glob."),
     )
     parser.add_argument(
         "--regex", default=None,
-        help="Only show events whose title matches this regex pattern (case-insensitive). Mutually exclusive with --search/--glob.",
+        help=_h("Only show events whose title matches this regex pattern (case-insensitive). Mutually exclusive with --search/--glob."),
     )
     parser.add_argument(
         "--glob", default=None,
-        help="Only show events whose title matches this glob pattern (case-insensitive, e.g. '*AI*meetup*'). Mutually exclusive with --search/--regex.",
+        help=_h("Only show events whose title matches this glob pattern (case-insensitive, e.g. '*AI*meetup*'). Mutually exclusive with --search/--regex."),
     )
     parser.add_argument(
         "--city", default=None,
-        help="Filter by city name (case-insensitive exact match).",
+        help=_h("Filter by city name (case-insensitive exact match)."),
     )
     parser.add_argument(
         "--region", default=None,
-        help="Filter by region/state (case-insensitive exact match).",
+        help=_h("Filter by region/state (case-insensitive exact match)."),
     )
     parser.add_argument(
         "--country", default=None,
-        help="Filter by country (case-insensitive exact match).",
+        help=_h("Filter by country (case-insensitive exact match)."),
     )
     parser.add_argument(
         "--location-type", default=None,
-        help="Filter by location type (e.g. 'offline', 'online').",
+        help=_h("Filter by location type (e.g. 'offline', 'online')."),
     )
     parser.add_argument(
         "--sf", action="store_true",
-        help="Shortcut: filter by city 'San Francisco'. Overrides --city.",
+        help=_h("Shortcut: filter by city 'San Francisco'. Overrides --city."),
     )
     parser.add_argument(
         "--lat", type=float, default=None,
-        help="Latitude of search center for proximity filter. Requires --lon.",
+        help=_h("Latitude of search center for proximity filter. Requires --lon."),
     )
     parser.add_argument(
         "--lon", type=float, default=None,
-        help="Longitude of search center for proximity filter. Requires --lat.",
+        help=_h("Longitude of search center for proximity filter. Requires --lat."),
     )
     parser.add_argument(
         "--radius", type=float, default=None,
-        help="Search radius in miles (default: 5). Requires --lat and --lon.",
+        help=_h("Search radius in miles (default: 5). Requires --lat and --lon."),
     )
     parser.add_argument(
         "--discard", action="store_true",
-        help="Mark all displayed events as seen. Mutually exclusive with --all and --reset.",
+        help=_h("Mark all displayed events as seen. Mutually exclusive with --all and --reset."),
     )
     parser.add_argument(
         "--all", action="store_true", dest="show_all",
-        help="Show all events including previously discarded (seen ones are grayed out). Mutually exclusive with --discard.",
+        help=_h("Show all events including previously discarded (seen ones are grayed out). Mutually exclusive with --discard."),
     )
     parser.add_argument(
         "--reset", action="store_true",
-        help="Clear the seen events list. Mutually exclusive with --discard.",
+        help=_h("Clear the seen events list. Mutually exclusive with --discard."),
     )
 
 
@@ -325,7 +332,7 @@ def _parse_with_query_text(
 
     # Attempt 2: extract trailing positional as free-text query.
     raw = sys.argv[1:] if argv is None else list(argv)
-    if raw and not raw[-1].startswith("-") and raw[-1] not in {"refresh", "chat", "sc", "like", "suggest"}:
+    if raw and not raw[-1].startswith("-") and raw[-1] not in {"refresh", "chat", "sc", "like", "suggest", "query"}:
         candidate = raw[-1]
         rest = raw[:-1]
         parser.error = _capture_error  # type: ignore[assignment]
@@ -346,15 +353,16 @@ def _parse_with_query_text(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Query and browse Luma events from a local cache.\n"
+            "Find your next Luma event.\n"
             "\n"
             "Subcommands:\n"
-            "  luma refresh   Fetch events from all sources and write to cache.\n"
-            "  luma chat      Interactive chat with Luma assistant.\n"
+            "  luma           Show today's popular events.\n"
+            "  luma refresh   Fetch fresh events from Luma.\n"
+            "  luma query     Query events with filters.\n"
             "  luma like      Like or dislike events interactively.\n"
             "  luma suggest   Get personalized event suggestions.\n"
             "  luma sc        Run a saved shortcut.\n"
-            "  luma [options] Query cached events (default).\n"
+            "  luma chat      Interactive chat with Luma assistant.\n"
             "\n"
             "Date subcommands:\n"
             "  luma today|tomorrow              Events for today or tomorrow.\n"
@@ -367,17 +375,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
         formatter_class=argparse.RawTextHelpFormatter,
         add_help=False,
+        usage="luma [-h] [command] [options]",
     )
-    parser.add_argument("-h", "--help", action="help", default=argparse.SUPPRESS, help="Show this help message and exit.")
-    parser.add_argument("--cache-dir", default=None, help="Path to cache directory (default: ~/.luma/events).")
-    parser.add_argument("--json", action="store_true", dest="json_output", help="Output results as JSON.")
-    parser.add_argument("--debug", action="store_true", help="Enable debug output.")
-    parser.add_argument("--config", default=None, help="Path to config file (default: ~/.luma/config.toml).")
-    parser.add_argument("--provider", default=None, help="LLM provider override (e.g. 'openai', 'anthropic').")
+    parser.add_argument("-h", "--help", action="help", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    parser.add_argument("--cache-dir", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--json", action="store_true", dest="json_output", help=argparse.SUPPRESS)
+    parser.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--config", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--provider", default=None, help=argparse.SUPPRESS)
     subparsers = parser.add_subparsers(dest="command")
+    chat_parser = subparsers.add_parser("chat", help=argparse.SUPPRESS)
+    chat_parser.add_argument("--provider", default=None, help=argparse.SUPPRESS)
+    like_parser = subparsers.add_parser("like", help=argparse.SUPPRESS)
+    _add_query_args(like_parser)
+    query_parser = subparsers.add_parser("query", help=argparse.SUPPRESS)
+    query_parser.add_argument("--provider", default=None, help=argparse.SUPPRESS)
+    _add_query_args(query_parser)
     refresh_parser = subparsers.add_parser(
         "refresh",
-        help="Fetch events from all sources and write to cache.",
+        help=argparse.SUPPRESS,
     )
     refresh_parser.add_argument(
         "--retries",
@@ -392,12 +408,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=f"Number of days ahead to fetch events (default: {FETCH_WINDOW_DAYS}).",
     )
     refresh_parser.add_argument("--provider", default=None, help=argparse.SUPPRESS)
-    chat_parser = subparsers.add_parser("chat", help="Interactive chat with Luma assistant.")
-    chat_parser.add_argument("--provider", default=None, help=argparse.SUPPRESS)
-    subparsers.add_parser("sc", help="Run a saved shortcut (use 'luma sc' to list).")
-    like_parser = subparsers.add_parser("like", help="Like or dislike events interactively.")
-    _add_query_args(like_parser)
-    suggest_parser = subparsers.add_parser("suggest", help="Get personalized event suggestions.")
+    subparsers.add_parser("sc", help=argparse.SUPPRESS)
+    suggest_parser = subparsers.add_parser("suggest", help=argparse.SUPPRESS)
     suggest_parser.add_argument(
         "--top",
         type=int,
@@ -405,7 +417,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Limit how many suggestions to return (default: 10).",
     )
     suggest_parser.add_argument("--provider", default=None, help=argparse.SUPPRESS)
-    _add_query_args(parser)
+    _add_query_args(parser, hidden=True)
+    for grp in parser._action_groups:
+        grp._group_actions = [a for a in grp._group_actions if not isinstance(a, argparse._SubParsersAction)]
     return _parse_with_query_text(parser, argv)
 
 
@@ -543,6 +557,10 @@ def main() -> int:
         return command_like.run(args, store, preferences)
     if args.command == "suggest":
         return command_suggest.run(store, preferences, llm_config=_llm_config(), top=args.top)
+    bare_form = args.command is None
+    has_date_filter = args.from_date is not None or args.to_date is not None or args.days is not None or args.range is not None
+    if bare_form and not has_date_filter and args.min_guest is None:
+        args.min_guest = 1
     return command_query.run(args, store, cache_dir, preferences, _llm_config())
 
 

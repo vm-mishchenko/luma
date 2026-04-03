@@ -326,7 +326,7 @@ def download_events(
         slug = _extract_slug(cal["url"])
         calendar_api_id = cal.get("calendar_api_id")
         if calendar_api_id:
-            print(f"Fetching calendar events: {slug} ({calendar_api_id})", file=sys.stderr)
+            print(f"Fetching calendar events: {slug}", file=sys.stderr)
             all_events.extend(
                 _fetch_calendar_events(
                     slug,
@@ -343,10 +343,7 @@ def download_events(
             slug, retries=retries
         )
         if source_type == "calendar" and resolved_calendar_id:
-            print(
-                f"Fetching calendar events: {slug} ({resolved_calendar_id})",
-                file=sys.stderr,
-            )
+            print(f"Fetching calendar events: {slug}", file=sys.stderr)
             all_events.extend(
                 _fetch_calendar_events(
                     slug,
