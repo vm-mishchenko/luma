@@ -9,6 +9,37 @@ import tomllib
 from dataclasses import dataclass
 
 
+DEFAULT_REFRESH_CATEGORIES: tuple[str, ...] = (
+    "https://luma.com/ai",
+    "https://luma.com/tech",
+    "https://luma.com/sf",
+)
+
+DEFAULT_REFRESH_CALENDARS: tuple[dict[str, str], ...] = (
+    {"url": "https://luma.com/genai-sf", "calendar_api_id": "cal-JTdFQadEz0AOxyV"},
+    {"url": "https://luma.com/frontiertower", "calendar_api_id": "cal-Sl7q1nHTRXQzjP2"},
+    {"url": "https://luma.com/sf-hardware-meetup", "calendar_api_id": "cal-tFAzNGOZ9xn6kT2"},
+    {"url": "https://luma.com/deepmind", "calendar_api_id": "cal-7Q5A70Bz5Idxopu"},
+    {"url": "https://luma.com/genai-collective", "calendar_api_id": "cal-E74MDlDKBaeAwXK"},
+    {"url": "https://luma.com/sfaiengineers", "calendar_api_id": "cal-EmYs2kgt1D9Gb27"},
+    {"url": "https://luma.com/datadoghq", "calendar_api_id": "cal-58UTRXnfpeEA6ii"},
+)
+
+
+def _format_default_refresh_toml() -> str:
+    lines = ["[refresh]", "categories = ["]
+    for url in DEFAULT_REFRESH_CATEGORIES:
+        lines.append(f'  "{url}",')
+    lines.append("]")
+    lines.append("")
+    for cal in DEFAULT_REFRESH_CALENDARS:
+        lines.append("[[refresh.calendars]]")
+        lines.append(f'url = "{cal["url"]}"')
+        lines.append(f'calendar_api_id = "{cal["calendar_api_id"]}"')
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 CONFIG_TEMPLATE = """\
 [llm]
 provider = "anthropic"
@@ -35,7 +66,7 @@ provider = "anthropic"
 # popular = ["--sort", "guest", "--min-guest", "100"]
 # tomorrow = ["--range", "tomorrow"]
 # weekend = ["--range", "weekend"]
-"""
+""" + _format_default_refresh_toml()
 
 _SHORTCUT_NAME_RE = re.compile(r"^[a-zA-Z0-9-]+$")
 
@@ -125,6 +156,92 @@ def validate_config(config: dict) -> None:
             if not isinstance(mongo.get("database"), str):
                 print("Error: Set database in [storage.mongo].", file=sys.stderr)
                 raise SystemExit(2)
+
+    refresh = config.get("refresh")
+    if refresh is not None:
+        if not isinstance(refresh, dict):
+            print("Error: [refresh] must be a table.", file=sys.stderr)
+            raise SystemExit(2)
+        if "categories" in refresh:
+            cats = refresh["categories"]
+            if not isinstance(cats, list) or not all(isinstance(x, str) for x in cats):
+                print(
+                    "Error: [refresh].categories must be an array of strings.",
+                    file=sys.stderr,
+                )
+                raise SystemExit(2)
+        if "calendars" in refresh:
+            cals = refresh["calendars"]
+            if not isinstance(cals, list):
+                print("Error: [refresh].calendars must be an array.", file=sys.stderr)
+                raise SystemExit(2)
+            for i, row in enumerate(cals):
+                if not isinstance(row, dict):
+                    print(
+                        f"Error: [refresh].calendars[{i}] must be a table.",
+                        file=sys.stderr,
+                    )
+                    raise SystemExit(2)
+                if not isinstance(row.get("url"), str):
+                    print(
+                        f"Error: [refresh].calendars[{i}] must have a string url.",
+                        file=sys.stderr,
+                    )
+                    raise SystemExit(2)
+                if "calendar_api_id" in row:
+                    cid = row["calendar_api_id"]
+                    if cid is not None and not isinstance(cid, str):
+                        print(
+                            f"Error: [refresh].calendars[{i}].calendar_api_id must be a string.",
+                            file=sys.stderr,
+                        )
+                        raise SystemExit(2)
+
+
+def _dedupe_category_urls(urls: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for u in urls:
+        if u in seen:
+            continue
+        seen.add(u)
+        out.append(u)
+    return out
+
+
+def _dedupe_calendars(
+    rows: list[dict[str, str | None]],
+) -> list[dict[str, str | None]]:
+    seen: set[str] = set()
+    out: list[dict[str, str | None]] = []
+    for row in rows:
+        url = row["url"]
+        if url in seen:
+            continue
+        seen.add(url)
+        cid = row.get("calendar_api_id")
+        out.append({"url": url, "calendar_api_id": cid})
+    return out
+
+
+def get_refresh_sources(config: dict) -> tuple[list[str], list[dict[str, str | None]]]:
+    """Resolve category URLs and calendar rows from config only (dedupe). No runtime defaults."""
+    refresh_tbl = config.get("refresh")
+    if refresh_tbl is None:
+        categories: list[str] = []
+        calendars: list[dict[str, str | None]] = []
+    else:
+        categories = list(refresh_tbl.get("categories", []))
+        calendars_raw = refresh_tbl.get("calendars", [])
+        calendars = []
+        for row in calendars_raw:
+            r = row  # validated dict
+            cid = r.get("calendar_api_id")
+            calendars.append({"url": r["url"], "calendar_api_id": cid})
+
+    categories = _dedupe_category_urls(categories)
+    calendars = _dedupe_calendars(calendars)
+    return categories, calendars
 
 
 def get_llm_config(

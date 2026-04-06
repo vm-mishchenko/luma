@@ -35,6 +35,7 @@ from luma.user_config import (
     ensure_config,
     get_event_provider,
     get_llm_config,
+    get_refresh_sources,
     get_shortcuts,
     load_config,
     validate_config,
@@ -360,7 +361,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "\n"
             "  Prefix any with 'next-' for the following week (e.g. next-week, next-fri).\n"
             "\n"
-            "Configuration: ~/.luma"
+            "Configuration: ~/.luma/config.toml (LLM, refresh sources, shortcuts).\n"
+            "Edit [refresh] in that file to change which Luma categories and calendars refresh uses."
         ),
         formatter_class=argparse.RawTextHelpFormatter,
         add_help=False,
@@ -532,9 +534,12 @@ def main() -> int:
         return get_llm_config(config, provider_override=provider_override, required=required)
 
     if args.command == "refresh":
+        cat_urls, cals = get_refresh_sources(config)
         return command_refresh.run(
             args.retries, store,
             llm_config=_llm_config(required=False),
+            category_urls=cat_urls,
+            calendars=cals,
             days=args.days,
             config_path=config_path,
             cache_dir=events_cache_dir,

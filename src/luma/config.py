@@ -31,20 +31,6 @@ FETCH_WINDOW_DAYS = 30
 REQUEST_DELAY_SEC = 0.3
 HARDCODED_LAT = "37.33939"
 HARDCODED_LON = "-121.89496"
-HARDCODED_CATEGORY_URLS = [
-    "https://luma.com/ai",
-    "https://luma.com/tech",
-    "https://luma.com/sf",
-]
-HARDCODED_CALENDARS = [
-    {"url": "https://luma.com/genai-sf", "calendar_api_id": "cal-JTdFQadEz0AOxyV"},
-    {"url": "https://luma.com/frontiertower", "calendar_api_id": "cal-Sl7q1nHTRXQzjP2"},
-    {"url": "https://luma.com/sf-hardware-meetup", "calendar_api_id": "cal-tFAzNGOZ9xn6kT2"},
-    {"url": "https://luma.com/deepmind", "calendar_api_id": "cal-7Q5A70Bz5Idxopu"},
-    {"url": "https://luma.com/genai-collective", "calendar_api_id": "cal-E74MDlDKBaeAwXK"},
-    {"url": "https://luma.com/sfaiengineers", "calendar_api_id": "cal-EmYs2kgt1D9Gb27"},
-    {"url": "https://luma.com/datadoghq", "calendar_api_id": "cal-58UTRXnfpeEA6ii"},
-]
 PAGINATION_LIMIT = "50"
 
 NOMINATIM_BASE_URL = "https://nominatim.openstreetmap.org"

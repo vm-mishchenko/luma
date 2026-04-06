@@ -11,12 +11,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from luma.config import (
-    FETCH_WINDOW_DAYS,
-    HARDCODED_CALENDARS,
-    HARDCODED_CATEGORY_URLS,
-    TIMEZONE_NAME,
-)
+from luma.config import FETCH_WINDOW_DAYS, TIMEZONE_NAME
 from luma.download import download_events
 from luma.enrich import enrich_events
 from luma.event_store import EventStore
@@ -37,6 +32,8 @@ def refresh(
     retries: int,
     store: EventStore,
     llm_config: LLMConfig | None,
+    category_urls: list[str],
+    calendars: list[dict[str, str | None]],
     days: int | None = None,
     config_path: pathlib.Path | None = None,
     cache_dir: pathlib.Path | None = None,
@@ -47,10 +44,16 @@ def refresh(
     start_utc, end_utc = _window(now_utc, days=window_days)
     print(
         f"Fetching events for the next {window_days} days"
-        f" from {len(HARDCODED_CATEGORY_URLS)} categories and {len(HARDCODED_CALENDARS)} calendars",
+        f" from {len(category_urls)} categories and {len(calendars)} calendars",
         file=sys.stderr,
     )
-    events = download_events(retries=retries, start_utc=start_utc, end_utc=end_utc)
+    events = download_events(
+        retries=retries,
+        start_utc=start_utc,
+        end_utc=end_utc,
+        category_urls=category_urls,
+        calendars=calendars,
+    )
     events = enrich_events(
         events, llm_config, config_path=config_path, cache_dir=cache_dir
     )

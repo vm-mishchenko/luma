@@ -19,8 +19,6 @@ from typing import Any
 
 from luma.config import (
     API_BASE,
-    HARDCODED_CALENDARS,
-    HARDCODED_CATEGORY_URLS,
     HARDCODED_LAT,
     HARDCODED_LON,
     PAGINATION_LIMIT,
@@ -310,19 +308,24 @@ def _dedupe_by_url(events: list[Event]) -> list[Event]:
 
 
 def download_events(
-    *, retries: int, start_utc: datetime, end_utc: datetime
+    *,
+    retries: int,
+    start_utc: datetime,
+    end_utc: datetime,
+    category_urls: list[str],
+    calendars: list[dict[str, str | None]],
 ) -> list[Event]:
     """Fetch events from all configured sources and return deduplicated list."""
     all_events: list[Event] = []
 
-    category_slugs = [_extract_slug(url) for url in HARDCODED_CATEGORY_URLS]
+    category_slugs = [_extract_slug(url) for url in category_urls]
     for slug in category_slugs:
         print(f"Fetching category events: {slug}", file=sys.stderr)
         all_events.extend(
             _fetch_category_events(slug, start_utc=start_utc, end_utc=end_utc, retries=retries)
         )
 
-    for cal in HARDCODED_CALENDARS:
+    for cal in calendars:
         slug = _extract_slug(cal["url"])
         calendar_api_id = cal.get("calendar_api_id")
         if calendar_api_id:

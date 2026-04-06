@@ -61,6 +61,28 @@ host = "http://localhost:11434"
 model = "llama3.1"
 ```
 
+### Event sources
+
+Configure which Luma category pages and calendars `luma refresh` fetches events from.
+
+```toml
+[refresh]
+categories = [
+  "https://luma.com/ai",
+  "https://luma.com/tech",
+]
+
+[[refresh.calendars]]
+url = "https://luma.com/genai-sf"
+calendar_api_id = "cal-JTdFQadEz0AOxyV"
+
+[[refresh.calendars]]
+url = "https://luma.com/deepmind"
+calendar_api_id = "cal-7Q5A70Bz5Idxopu"
+```
+
+`calendar_api_id` is optional; if omitted, `luma refresh` resolves it automatically from the URL during fetch.
+
 ### One-off provider
 
 ```shell
