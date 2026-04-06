@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from luma.user_config import LLMConfig
 
 from luma.config import (
+    DEFAULT_CONFIG_PATH,
     DEFAULT_WINDOW_DAYS,
     HARDCODED_LAT,
     HARDCODED_LON,
@@ -93,8 +94,8 @@ def _format_los_angeles_time(value: str) -> str:
     return f"{weekday} {month} {day}, {time_part}"
 
 
-def _load_seen_urls(cache_dir: pathlib.Path) -> set[str]:
-    seen_file = cache_dir / SEEN_FILENAME
+def _load_seen_urls(preferences_dir: pathlib.Path) -> set[str]:
+    seen_file = preferences_dir / SEEN_FILENAME
     if not seen_file.is_file():
         return set()
     try:
@@ -107,9 +108,9 @@ def _load_seen_urls(cache_dir: pathlib.Path) -> set[str]:
     return set()
 
 
-def _save_seen_urls(urls: set[str], cache_dir: pathlib.Path) -> None:
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    seen_file = cache_dir / SEEN_FILENAME
+def _save_seen_urls(urls: set[str], preferences_dir: pathlib.Path) -> None:
+    preferences_dir.mkdir(parents=True, exist_ok=True)
+    seen_file = preferences_dir / SEEN_FILENAME
     with open(seen_file, "w", encoding="utf-8") as f:
         json.dump(sorted(urls), f, indent=2)
 
@@ -220,7 +221,7 @@ def _print_events(
 def _query(
     args: argparse.Namespace,
     store: EventStore,
-    cache_dir: pathlib.Path,
+    preferences_dir: pathlib.Path,
 ) -> int:
     if args.discard and args.show_all:
         print("--discard and --all are mutually exclusive.", file=sys.stderr)
@@ -230,14 +231,14 @@ def _query(
         return 2
 
     if args.reset:
-        seen_file = cache_dir / SEEN_FILENAME
+        seen_file = preferences_dir / SEEN_FILENAME
         if seen_file.is_file():
             seen_file.unlink()
             print("Cleared seen events.", file=sys.stderr)
         else:
             print("No seen events to clear.", file=sys.stderr)
 
-    seen_urls = _load_seen_urls(cache_dir)
+    seen_urls = _load_seen_urls(preferences_dir)
 
     params = _build_query_params(args)
     try:
@@ -277,7 +278,7 @@ def _query(
         print(json.dumps(output, indent=2))
         if args.discard:
             new_seen = seen_urls | {e.url for e in result.events}
-            _save_seen_urls(new_seen, cache_dir)
+            _save_seen_urls(new_seen, preferences_dir)
         return 0
 
     display = result.events[: args.top] if args.top else result.events
@@ -285,7 +286,7 @@ def _query(
 
     if args.discard:
         new_seen = seen_urls | {e.url for e in display}
-        _save_seen_urls(new_seen, cache_dir)
+        _save_seen_urls(new_seen, preferences_dir)
         print(f"Marked {len(display)} events as seen.", file=sys.stderr)
 
     return 0
@@ -383,17 +384,20 @@ def _agent_query(args: argparse.Namespace, store: EventStore, preferences: "Pref
 def run(
     args: argparse.Namespace,
     store: EventStore,
-    cache_dir: pathlib.Path,
+    preferences_dir: pathlib.Path,
     preferences: "PreferenceStore",
     llm_config: "LLMConfig | None",
+    *,
+    config_path: pathlib.Path | None = None,
 ) -> int:
     if args.query_text:
         if llm_config is None:
+            cfg = config_path if config_path is not None else DEFAULT_CONFIG_PATH
             print(
                 "Error: LLM API key required for free-text queries."
-                " Configure api_key in ~/.luma/config.toml.",
+                f" Configure api_key in {cfg}.",
                 file=sys.stderr,
             )
             return 2
         return _agent_query(args, store, preferences, llm_config)
-    return _query(args, store, cache_dir)
+    return _query(args, store, preferences_dir)

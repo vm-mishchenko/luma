@@ -19,10 +19,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
-import pytest
-
 import luma.cli as cli
-import luma.config as config
 from luma.models import Event
 
 
@@ -76,10 +73,12 @@ SAMPLE_EVENTS = [
 
 
 def _write_cache(tmp_path, events=None):
-    """Write a minimal cache file directly into *tmp_path*."""
+    """Write a minimal events.json under *tmp_path*/cache/."""
     if events is None:
         events = SAMPLE_EVENTS
-    path = tmp_path / "events.json"
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    path = cache_dir / "events.json"
     path.write_text(json.dumps([e.model_dump() for e in events], indent=2), encoding="utf-8")
     return path
 
@@ -111,19 +110,6 @@ def _run_cli(argv):
 
 
 # ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-@pytest.fixture(autouse=True)
-def _isolate_config(tmp_path):
-    """Prevent tests from writing to the real ~/.luma/ directory."""
-    isolated = tmp_path / "default-config.toml"
-    with mock.patch.object(cli, "DEFAULT_CONFIG_PATH", isolated):
-        yield
-    config._reset()
-
-
-# ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
@@ -140,7 +126,7 @@ def test_refresh_success(tmp_path, capsys):
     assert rc == 0
     err = capsys.readouterr().err
     assert "Fetched 3 events" in err
-    assert (tmp_path / "events.json").is_file()
+    assert (tmp_path / "cache" / "events.json").is_file()
 
 
 def test_refresh_network_error(tmp_path, capsys):
@@ -178,7 +164,7 @@ def test_discard_writes_seen(tmp_path, capsys):
     _write_cache(tmp_path)
     rc = _run_cli(["--cache-dir", str(tmp_path), "--discard", "--min-guest", "0"])
     assert rc == 0
-    seen_path = tmp_path / "seen.json"
+    seen_path = tmp_path / "preferences" / "seen.json"
     assert seen_path.is_file()
     seen = json.loads(seen_path.read_text(encoding="utf-8"))
     assert len(seen) > 0
@@ -187,7 +173,8 @@ def test_discard_writes_seen(tmp_path, capsys):
 def test_show_all_includes_seen(tmp_path, capsys):
     _write_cache(tmp_path)
 
-    seen_path = tmp_path / "seen.json"
+    seen_path = tmp_path / "preferences" / "seen.json"
+    seen_path.parent.mkdir(parents=True, exist_ok=True)
     seen_path.write_text(
         json.dumps(["https://luma.com/ai-meetup"]), encoding="utf-8"
     )
@@ -271,7 +258,7 @@ def test_free_text_prints_agent_response(tmp_path, capsys):
         yield FinalResult(result=TextResult(text="Here are your events."))
 
     with mock.patch("luma.agent.agent.Agent.query_iter", side_effect=_mock_query_iter):
-        rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "hello"])
+        rc = _run_cli(["--cache-dir", str(tmp_path), "hello"])
     assert rc == 0
     assert "Here are your events." in capsys.readouterr().out
 
@@ -285,7 +272,7 @@ def test_free_text_with_flags(tmp_path, capsys):
         yield FinalResult(result=TextResult(text="Here are your events."))
 
     with mock.patch("luma.agent.agent.Agent.query_iter", side_effect=_mock_query_iter):
-        rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "--days", "7", "hello"])
+        rc = _run_cli(["--cache-dir", str(tmp_path), "--days", "7", "hello"])
     assert rc == 0
     assert "Here are your events." in capsys.readouterr().out
 
@@ -325,7 +312,7 @@ def test_free_text_event_list_result(tmp_path, capsys):
         yield FinalResult(result=EventListResult(ids=ids))
 
     with mock.patch("luma.agent.agent.Agent.query_iter", side_effect=_mock_query_iter):
-        rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "find events"])
+        rc = _run_cli(["--cache-dir", str(tmp_path), "find events"])
     assert rc == 0
     out = capsys.readouterr().out
     assert "Agent Event A" in out
@@ -341,7 +328,7 @@ def test_free_text_agent_exception(tmp_path, capsys):
         raise AgentError("boom")
 
     with mock.patch("luma.agent.agent.Agent.query_iter", side_effect=_mock_query_iter):
-        rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "hello"])
+        rc = _run_cli(["--cache-dir", str(tmp_path), "hello"])
     assert rc == 1
     assert "boom" in capsys.readouterr().err
 
@@ -371,7 +358,7 @@ def test_json_agent_text(tmp_path, capsys):
     cfg = _write_config(tmp_path, _LLM_CONFIG_BLOCK)
 
     with mock.patch("luma.agent.agent.Agent.query", return_value=TextResult(text="hello response")):
-        rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "--json", "hello"])
+        rc = _run_cli(["--cache-dir", str(tmp_path), "--json", "hello"])
     assert rc == 0
     data = json.loads(capsys.readouterr().out)
     assert data["type"] == "text"
@@ -396,7 +383,7 @@ def test_json_agent_events(tmp_path, capsys):
     ids = [e.id for e in agent_events]
 
     with mock.patch("luma.agent.agent.Agent.query", return_value=EventListResult(ids=ids)):
-        rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "--json", "find events"])
+        rc = _run_cli(["--cache-dir", str(tmp_path), "--json", "find events"])
     assert rc == 0
     data = json.loads(capsys.readouterr().out)
     assert data["type"] == "events"
@@ -428,7 +415,7 @@ def test_json_discard(tmp_path, capsys):
     _write_cache(tmp_path)
     rc = _run_cli(["--cache-dir", str(tmp_path), "--json", "--discard", "--min-guest", "0"])
     assert rc == 0
-    seen_path = tmp_path / "seen.json"
+    seen_path = tmp_path / "preferences" / "seen.json"
     assert seen_path.is_file()
     seen = json.loads(seen_path.read_text(encoding="utf-8"))
     assert set(seen) == {e.url for e in SAMPLE_EVENTS if e.guest_count >= 0}
@@ -448,10 +435,10 @@ def test_json_no_cache_empty_stdout(tmp_path, capsys):
 
 
 def test_no_config_auto_creates(tmp_path, capsys):
-    cfg = tmp_path / "auto" / "config.toml"
+    cfg = tmp_path / "config.toml"
     assert not cfg.exists()
     _write_cache(tmp_path)
-    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path)])
+    rc = _run_cli(["--cache-dir", str(tmp_path)])
     assert rc == 0
     assert cfg.is_file()
     content = cfg.read_text(encoding="utf-8")
@@ -461,13 +448,13 @@ def test_no_config_auto_creates(tmp_path, capsys):
 def test_valid_config_loads(tmp_path, capsys):
     cfg = _write_config(tmp_path, _LLM_CONFIG_BLOCK)
     _write_cache(tmp_path)
-    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path)])
+    rc = _run_cli(["--cache-dir", str(tmp_path)])
     assert rc == 0
 
 
 def test_malformed_toml_exits_2(tmp_path, capsys):
     cfg = _write_config(tmp_path, "[invalid toml\n")
-    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path)])
+    rc = _run_cli(["--cache-dir", str(tmp_path)])
     assert rc == 2
     assert "malformed" in capsys.readouterr().err.lower()
 
@@ -483,7 +470,7 @@ def test_sc_runs_shortcut(tmp_path, capsys):
         _LLM_CONFIG_BLOCK + '[shortcuts]\npopular = ["--sort", "guest", "--min-guest", "100"]\n',
     )
     _write_cache(tmp_path)
-    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "sc", "popular"])
+    rc = _run_cli(["--cache-dir", str(tmp_path), "sc", "popular"])
     assert rc == 0
     out = capsys.readouterr().out
     assert "AI Meetup" in out
@@ -496,18 +483,18 @@ def test_sc_override_with_cli(tmp_path, capsys):
         _LLM_CONFIG_BLOCK + '[shortcuts]\nby-guest = ["--sort", "guest"]\n',
     )
     _write_cache(tmp_path)
-    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "sc", "by-guest", "--top", "1"])
+    rc = _run_cli(["--cache-dir", str(tmp_path), "sc", "by-guest", "--top", "1"])
     assert rc == 0
     out = capsys.readouterr().out
     assert "Top 1 events" in out
 
 
 def test_sc_list_shortcuts(tmp_path, capsys):
-    cfg = _write_config(
+    _write_config(
         tmp_path,
         '[shortcuts]\npopular = ["--sort", "guest"]\nweekend = ["--range", "weekend"]\n',
     )
-    rc = _run_cli(["--config", str(cfg), "sc"])
+    rc = _run_cli(["--cache-dir", str(tmp_path), "sc"])
     assert rc == 0
     out = capsys.readouterr().out
     assert "popular" in out
@@ -517,11 +504,11 @@ def test_sc_list_shortcuts(tmp_path, capsys):
 
 
 def test_sc_unknown_name(tmp_path, capsys):
-    cfg = _write_config(
+    _write_config(
         tmp_path,
         '[shortcuts]\npopular = ["--sort", "guest"]\n',
     )
-    rc = _run_cli(["--config", str(cfg), "sc", "nonexistent"])
+    rc = _run_cli(["--cache-dir", str(tmp_path), "sc", "nonexistent"])
     assert rc == 2
     err = capsys.readouterr().err
     assert "nonexistent" in err
@@ -529,9 +516,10 @@ def test_sc_unknown_name(tmp_path, capsys):
 
 
 def test_sc_no_config(tmp_path, capsys):
-    cfg = tmp_path / "new" / "config.toml"
+    root = tmp_path / "new"
+    cfg = root / "config.toml"
     assert not cfg.exists()
-    rc = _run_cli(["--config", str(cfg), "sc", "foo"])
+    rc = _run_cli(["--cache-dir", str(root), "sc", "foo"])
     assert rc == 2
     err = capsys.readouterr().err
     assert "foo" in err
@@ -657,10 +645,10 @@ def test_range_invalid(tmp_path, capsys):
 # ---------------------------------------------------------------------------
 
 
-def _write_preferences(luma_dir, filename, events):
-    """Write a preference file (liked.json or disliked.json)."""
-    luma_dir.mkdir(parents=True, exist_ok=True)
-    path = luma_dir / filename
+def _write_preferences(preferences_dir, filename, events):
+    """Write a preference file under *preferences_dir*."""
+    preferences_dir.mkdir(parents=True, exist_ok=True)
+    path = preferences_dir / filename
     path.write_text(
         json.dumps([e.model_dump() for e in events], indent=2), encoding="utf-8"
     )
@@ -668,14 +656,12 @@ def _write_preferences(luma_dir, filename, events):
 
 def test_like_saves_event(tmp_path, capsys, monkeypatch):
     _write_cache(tmp_path)
-    luma_dir = tmp_path / "luma"
-    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
-    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+    prefs = tmp_path / "preferences"
     monkeypatch.setattr("builtins.input", lambda _: "1")
     monkeypatch.setattr("sys.stdin", type("FakeTTY", (), {"isatty": lambda self: True})())
     rc = _run_cli(["--cache-dir", str(tmp_path), "like"])
     assert rc == 0
-    liked_path = luma_dir / "liked.json"
+    liked_path = prefs / "liked.json"
     assert liked_path.is_file()
     liked = json.loads(liked_path.read_text(encoding="utf-8"))
     assert len(liked) == 1
@@ -684,15 +670,13 @@ def test_like_saves_event(tmp_path, capsys, monkeypatch):
 
 def test_like_hides_already_liked(tmp_path, capsys, monkeypatch):
     _write_cache(tmp_path)
-    luma_dir = tmp_path / "luma"
-    _write_preferences(luma_dir, "liked.json", [SAMPLE_EVENTS[0]])
-    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
-    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+    prefs = tmp_path / "preferences"
+    _write_preferences(prefs, "liked.json", [SAMPLE_EVENTS[0]])
     monkeypatch.setattr("builtins.input", lambda _: "1")
     monkeypatch.setattr("sys.stdin", type("FakeTTY", (), {"isatty": lambda self: True})())
     rc = _run_cli(["--cache-dir", str(tmp_path), "like"])
     assert rc == 0
-    liked = json.loads((luma_dir / "liked.json").read_text(encoding="utf-8"))
+    liked = json.loads((prefs / "liked.json").read_text(encoding="utf-8"))
     liked_ids = [e["id"] for e in liked]
     assert SAMPLE_EVENTS[1].id in liked_ids
     assert liked_ids.count(SAMPLE_EVENTS[0].id) == 1
@@ -700,15 +684,13 @@ def test_like_hides_already_liked(tmp_path, capsys, monkeypatch):
 
 def test_like_hides_already_disliked(tmp_path, capsys, monkeypatch):
     _write_cache(tmp_path)
-    luma_dir = tmp_path / "luma"
-    _write_preferences(luma_dir, "disliked.json", [SAMPLE_EVENTS[0]])
-    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
-    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+    prefs = tmp_path / "preferences"
+    _write_preferences(prefs, "disliked.json", [SAMPLE_EVENTS[0]])
     monkeypatch.setattr("builtins.input", lambda _: "1")
     monkeypatch.setattr("sys.stdin", type("FakeTTY", (), {"isatty": lambda self: True})())
     rc = _run_cli(["--cache-dir", str(tmp_path), "like"])
     assert rc == 0
-    liked = json.loads((luma_dir / "liked.json").read_text(encoding="utf-8"))
+    liked = json.loads((prefs / "liked.json").read_text(encoding="utf-8"))
     liked_ids = [e["id"] for e in liked]
     # First event was disliked so hidden; position 1 should be the second event
     assert SAMPLE_EVENTS[1].id in liked_ids
@@ -717,21 +699,16 @@ def test_like_hides_already_disliked(tmp_path, capsys, monkeypatch):
 
 def test_like_empty_input(tmp_path, capsys, monkeypatch):
     _write_cache(tmp_path)
-    luma_dir = tmp_path / "luma"
-    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
-    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+    prefs = tmp_path / "preferences"
     monkeypatch.setattr("builtins.input", lambda _: "")
     monkeypatch.setattr("sys.stdin", type("FakeTTY", (), {"isatty": lambda self: True})())
     rc = _run_cli(["--cache-dir", str(tmp_path), "like"])
     assert rc == 0
-    assert not (luma_dir / "liked.json").exists()
+    assert not (prefs / "liked.json").exists()
 
 
 def test_like_ctrl_c(tmp_path, capsys, monkeypatch):
     _write_cache(tmp_path)
-    luma_dir = tmp_path / "luma"
-    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
-    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
 
     def _raise_interrupt(_):
         raise KeyboardInterrupt
@@ -744,9 +721,6 @@ def test_like_ctrl_c(tmp_path, capsys, monkeypatch):
 
 def test_like_non_tty(tmp_path, capsys, monkeypatch):
     _write_cache(tmp_path)
-    luma_dir = tmp_path / "luma"
-    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
-    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
     monkeypatch.setattr("sys.stdin", type("FakeNoTTY", (), {"isatty": lambda self: False})())
     rc = _run_cli(["--cache-dir", str(tmp_path), "like"])
     assert rc == 2
@@ -754,23 +728,18 @@ def test_like_non_tty(tmp_path, capsys, monkeypatch):
 
 def test_like_with_filters(tmp_path, capsys, monkeypatch):
     _write_cache(tmp_path)
-    luma_dir = tmp_path / "luma"
-    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
-    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+    prefs = tmp_path / "preferences"
     monkeypatch.setattr("builtins.input", lambda _: "1")
     monkeypatch.setattr("sys.stdin", type("FakeTTY", (), {"isatty": lambda self: True})())
     rc = _run_cli(["--cache-dir", str(tmp_path), "like", "--min-guest", "100"])
     assert rc == 0
-    liked = json.loads((luma_dir / "liked.json").read_text(encoding="utf-8"))
+    liked = json.loads((prefs / "liked.json").read_text(encoding="utf-8"))
     assert len(liked) == 1
     assert liked[0]["guest_count"] >= 100
 
 
 def test_like_invalid_number(tmp_path, capsys, monkeypatch):
     _write_cache(tmp_path)
-    luma_dir = tmp_path / "luma"
-    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
-    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
     monkeypatch.setattr("builtins.input", lambda _: "999")
     monkeypatch.setattr("sys.stdin", type("FakeTTY", (), {"isatty": lambda self: True})())
     rc = _run_cli(["--cache-dir", str(tmp_path), "like"])
@@ -779,14 +748,12 @@ def test_like_invalid_number(tmp_path, capsys, monkeypatch):
 
 def test_inline_dislike_saves_event(tmp_path, capsys, monkeypatch):
     _write_cache(tmp_path)
-    luma_dir = tmp_path / "luma"
-    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
-    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+    prefs = tmp_path / "preferences"
     monkeypatch.setattr("builtins.input", lambda _: "-1")
     monkeypatch.setattr("sys.stdin", type("FakeTTY", (), {"isatty": lambda self: True})())
     rc = _run_cli(["--cache-dir", str(tmp_path), "like"])
     assert rc == 0
-    disliked_path = luma_dir / "disliked.json"
+    disliked_path = prefs / "disliked.json"
     assert disliked_path.is_file()
     disliked = json.loads(disliked_path.read_text(encoding="utf-8"))
     assert len(disliked) == 1
@@ -795,15 +762,13 @@ def test_inline_dislike_saves_event(tmp_path, capsys, monkeypatch):
 
 def test_inline_mixed_like_and_dislike(tmp_path, capsys, monkeypatch):
     _write_cache(tmp_path)
-    luma_dir = tmp_path / "luma"
-    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
-    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+    prefs = tmp_path / "preferences"
     monkeypatch.setattr("builtins.input", lambda _: "1 -2")
     monkeypatch.setattr("sys.stdin", type("FakeTTY", (), {"isatty": lambda self: True})())
     rc = _run_cli(["--cache-dir", str(tmp_path), "like"])
     assert rc == 0
-    liked = json.loads((luma_dir / "liked.json").read_text(encoding="utf-8"))
-    disliked = json.loads((luma_dir / "disliked.json").read_text(encoding="utf-8"))
+    liked = json.loads((prefs / "liked.json").read_text(encoding="utf-8"))
+    disliked = json.loads((prefs / "disliked.json").read_text(encoding="utf-8"))
     assert len(liked) == 1
     assert liked[0]["id"] == SAMPLE_EVENTS[0].id
     assert len(disliked) == 1
@@ -854,7 +819,7 @@ def test_query_subcommand_free_text(tmp_path, capsys):
         yield FinalResult(result=TextResult(text="Here are your events."))
 
     with mock.patch("luma.agent.agent.Agent.query_iter", side_effect=_mock_query_iter):
-        rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "query", "hello"])
+        rc = _run_cli(["--cache-dir", str(tmp_path), "query", "hello"])
     assert rc == 0
     assert "Here are your events." in capsys.readouterr().out
 
@@ -881,7 +846,7 @@ def test_query_subcommand_discard(tmp_path, capsys):
     _write_cache(tmp_path)
     rc = _run_cli(["--cache-dir", str(tmp_path), "query", "--discard", "--min-guest", "0"])
     assert rc == 0
-    seen_path = tmp_path / "seen.json"
+    seen_path = tmp_path / "preferences" / "seen.json"
     assert seen_path.is_file()
     seen = json.loads(seen_path.read_text(encoding="utf-8"))
     assert len(seen) > 0
@@ -933,17 +898,17 @@ provider = "anthropic"
 def test_refresh_no_llm_section(tmp_path, capsys):
     cfg = _write_config(tmp_path, _NO_LLM_CONFIG)
     with mock.patch("luma.refresh.download_events", return_value=SAMPLE_EVENTS):
-        rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "refresh"])
+        rc = _run_cli(["--cache-dir", str(tmp_path), "refresh"])
     assert rc == 0
     err = capsys.readouterr().err
     assert "Skipping LLM enrichment" in err
-    assert (tmp_path / "events.json").is_file()
+    assert (tmp_path / "cache" / "events.json").is_file()
 
 
 def test_refresh_empty_provider_block(tmp_path, capsys):
     cfg = _write_config(tmp_path, _EMPTY_PROVIDER_CONFIG)
     with mock.patch("luma.refresh.download_events", return_value=SAMPLE_EVENTS):
-        rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "refresh"])
+        rc = _run_cli(["--cache-dir", str(tmp_path), "refresh"])
     assert rc == 0
     err = capsys.readouterr().err
     assert "Skipping LLM enrichment" in err
@@ -952,7 +917,7 @@ def test_refresh_empty_provider_block(tmp_path, capsys):
 def test_refresh_valid_key_runs_enrichment(tmp_path, capsys):
     cfg = _write_config(tmp_path, _LLM_CONFIG_BLOCK)
     with mock.patch("luma.refresh.download_events", return_value=SAMPLE_EVENTS):
-        rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "refresh"])
+        rc = _run_cli(["--cache-dir", str(tmp_path), "refresh"])
     assert rc == 0
     err = capsys.readouterr().err
     assert "Skipping LLM enrichment" not in err
@@ -960,19 +925,16 @@ def test_refresh_valid_key_runs_enrichment(tmp_path, capsys):
 
 def test_chat_no_key_fails(tmp_path, capsys):
     cfg = _write_config(tmp_path, _NO_LLM_CONFIG)
-    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "chat"])
+    rc = _run_cli(["--cache-dir", str(tmp_path), "chat"])
     assert rc == 2
     assert "Error" in capsys.readouterr().err
 
 
-def test_suggest_no_key_fails(tmp_path, capsys, monkeypatch):
-    cfg = _write_config(tmp_path, _NO_LLM_CONFIG)
+def test_suggest_no_key_fails(tmp_path, capsys):
+    _write_config(tmp_path, _NO_LLM_CONFIG)
     _write_cache(tmp_path)
-    luma_dir = tmp_path / "luma"
-    _write_preferences(luma_dir, "liked.json", [SAMPLE_EVENTS[0]])
-    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
-    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
-    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "suggest"])
+    _write_preferences(tmp_path / "preferences", "liked.json", [SAMPLE_EVENTS[0]])
+    rc = _run_cli(["--cache-dir", str(tmp_path), "suggest"])
     assert rc == 2
     assert "Error" in capsys.readouterr().err
 
@@ -980,7 +942,7 @@ def test_suggest_no_key_fails(tmp_path, capsys, monkeypatch):
 def test_query_structured_no_key_works(tmp_path, capsys):
     cfg = _write_config(tmp_path, _NO_LLM_CONFIG)
     _write_cache(tmp_path)
-    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "query", "--min-guest", "0"])
+    rc = _run_cli(["--cache-dir", str(tmp_path), "query", "--min-guest", "0"])
     assert rc == 0
     assert "Top" in capsys.readouterr().out
 
@@ -988,18 +950,18 @@ def test_query_structured_no_key_works(tmp_path, capsys):
 def test_query_free_text_no_key_fails(tmp_path, capsys):
     cfg = _write_config(tmp_path, _NO_LLM_CONFIG)
     _write_cache(tmp_path)
-    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "query", "hello"])
+    rc = _run_cli(["--cache-dir", str(tmp_path), "query", "hello"])
     assert rc == 2
     err = capsys.readouterr().err
     assert "LLM API key required" in err
-    assert "~/.luma/config.toml" in err
+    assert str(tmp_path / "config.toml") in err
 
 
 def test_config_template_commented_out(tmp_path, capsys):
-    cfg = tmp_path / "auto" / "config.toml"
+    cfg = tmp_path / "config.toml"
     assert not cfg.exists()
     _write_cache(tmp_path)
-    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path)])
+    rc = _run_cli(["--cache-dir", str(tmp_path)])
     assert rc == 0
     content = cfg.read_text(encoding="utf-8")
     assert '# api_key = ""' in content
@@ -1010,7 +972,7 @@ def test_config_template_commented_out(tmp_path, capsys):
 def test_refresh_skip_message_shows_config_path(tmp_path, capsys):
     cfg = _write_config(tmp_path, _NO_LLM_CONFIG)
     with mock.patch("luma.refresh.download_events", return_value=SAMPLE_EVENTS):
-        rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "refresh"])
+        rc = _run_cli(["--cache-dir", str(tmp_path), "refresh"])
     assert rc == 0
     err = capsys.readouterr().err
     assert str(cfg) in err
@@ -1021,25 +983,19 @@ def test_refresh_skip_message_shows_config_path(tmp_path, capsys):
 # ---------------------------------------------------------------------------
 
 
-def test_suggest_no_cache(tmp_path, capsys, monkeypatch):
-    cfg = _write_config(tmp_path, _LLM_CONFIG_BLOCK)
-    luma_dir = tmp_path / "luma"
-    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
-    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
-    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "suggest"])
+def test_suggest_no_cache(tmp_path, capsys):
+    _write_config(tmp_path, _LLM_CONFIG_BLOCK)
+    rc = _run_cli(["--cache-dir", str(tmp_path), "suggest"])
     assert rc == 1
     err = capsys.readouterr().err
     assert "luma refresh" in err
     assert "luma like" in err
 
 
-def test_suggest_no_likes(tmp_path, capsys, monkeypatch):
-    cfg = _write_config(tmp_path, _LLM_CONFIG_BLOCK)
+def test_suggest_no_likes(tmp_path, capsys):
+    _write_config(tmp_path, _LLM_CONFIG_BLOCK)
     _write_cache(tmp_path)
-    luma_dir = tmp_path / "luma"
-    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
-    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
-    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "suggest"])
+    rc = _run_cli(["--cache-dir", str(tmp_path), "suggest"])
     assert rc == 1
     err = capsys.readouterr().err
     assert "luma like" in err
@@ -1048,18 +1004,15 @@ def test_suggest_no_likes(tmp_path, capsys, monkeypatch):
 def test_suggest_success(tmp_path, capsys, monkeypatch):
     from luma.agent import EventListResult, FinalResult
 
-    cfg = _write_config(tmp_path, _LLM_CONFIG_BLOCK)
+    _write_config(tmp_path, _LLM_CONFIG_BLOCK)
     _write_cache(tmp_path)
-    luma_dir = tmp_path / "luma"
-    _write_preferences(luma_dir, "liked.json", [SAMPLE_EVENTS[0]])
-    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
-    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+    _write_preferences(tmp_path / "preferences", "liked.json", [SAMPLE_EVENTS[0]])
 
     def _fake_query_iter(self, text, *, loader=None):
         yield FinalResult(result=EventListResult(ids=[SAMPLE_EVENTS[1].id]))
 
     monkeypatch.setattr("luma.agent.Agent.query_iter", _fake_query_iter)
-    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "suggest"])
+    rc = _run_cli(["--cache-dir", str(tmp_path), "suggest"])
     assert rc == 0
     out = capsys.readouterr().out
     assert "Tech Talk" in out
@@ -1068,17 +1021,14 @@ def test_suggest_success(tmp_path, capsys, monkeypatch):
 def test_suggest_agent_error(tmp_path, capsys, monkeypatch):
     from luma.agent import AgentError
 
-    cfg = _write_config(tmp_path, _LLM_CONFIG_BLOCK)
+    _write_config(tmp_path, _LLM_CONFIG_BLOCK)
     _write_cache(tmp_path)
-    luma_dir = tmp_path / "luma"
-    _write_preferences(luma_dir, "liked.json", [SAMPLE_EVENTS[0]])
-    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
-    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+    _write_preferences(tmp_path / "preferences", "liked.json", [SAMPLE_EVENTS[0]])
 
     def _raise_error(self, text, *, loader=None):
         raise AgentError("API failed")
 
     monkeypatch.setattr("luma.agent.Agent.query_iter", _raise_error)
-    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "suggest"])
+    rc = _run_cli(["--cache-dir", str(tmp_path), "suggest"])
     assert rc == 1
     assert "API failed" in capsys.readouterr().err

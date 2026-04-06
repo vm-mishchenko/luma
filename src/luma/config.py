@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import pathlib
 
+CACHE_SUBDIR = "cache"
+PREFERENCES_SUBDIR = "preferences"
+CONFIG_FILENAME = "config.toml"
+GEOCODE_CACHE_FILENAME = "coordinates-to-city.json"
+
 DEFAULT_LUMA_DIR = pathlib.Path.home() / ".luma"
-DEFAULT_CACHE_DIR = DEFAULT_LUMA_DIR / "events"
-DEFAULT_CONFIG_PATH = DEFAULT_LUMA_DIR / "config.toml"
+DEFAULT_CACHE_DIR = DEFAULT_LUMA_DIR / CACHE_SUBDIR
+DEFAULT_PREFERENCES_DIR = DEFAULT_LUMA_DIR / PREFERENCES_SUBDIR
+DEFAULT_CONFIG_PATH = DEFAULT_LUMA_DIR / CONFIG_FILENAME
 
 DEFAULT_WINDOW_DAYS = 1
 TIMEZONE_NAME = "America/Los_Angeles"
@@ -56,7 +62,3 @@ AGENT_MAX_TOKENS = 4096
 AGENT_MAX_PARALLEL_TOOLS = 10
 AGENT_LLM_TIMEOUT_SECONDS = 30
 AGENT_TOOL_TIMEOUT_SECONDS = 10
-
-
-def _reset() -> None:
-    """No-op kept for e2e test fixture compatibility."""

@@ -26,10 +26,10 @@ class PreferenceProvider(Protocol):
 
 
 class DiskPreferenceProvider:
-    """Reads and writes preference files on disk."""
+    """Reads and writes preference files on disk under *preferences_dir*."""
 
-    def __init__(self, luma_dir: pathlib.Path) -> None:
-        self._luma_dir = luma_dir
+    def __init__(self, preferences_dir: pathlib.Path) -> None:
+        self._preferences_dir = preferences_dir
 
     def load_liked(self) -> list[Event]:
         return self._load(LIKED_FILENAME)
@@ -44,7 +44,7 @@ class DiskPreferenceProvider:
         self._save(events, DISLIKED_FILENAME)
 
     def _load(self, filename: str) -> list[Event]:
-        path = self._luma_dir / filename
+        path = self._preferences_dir / filename
         if not path.is_file():
             return []
         try:
@@ -57,8 +57,8 @@ class DiskPreferenceProvider:
         return []
 
     def _save(self, events: list[Event], filename: str) -> None:
-        self._luma_dir.mkdir(parents=True, exist_ok=True)
-        path = self._luma_dir / filename
+        self._preferences_dir.mkdir(parents=True, exist_ok=True)
+        path = self._preferences_dir / filename
         with open(path, "w", encoding="utf-8") as f:
             json.dump([e.model_dump() for e in events], f, indent=2)
 

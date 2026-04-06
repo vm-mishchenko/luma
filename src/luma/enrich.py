@@ -17,6 +17,9 @@ from any_llm import completion
 
 from luma.config import (
     AGENT_MAX_TOKENS,
+    DEFAULT_CACHE_DIR,
+    DEFAULT_CONFIG_PATH,
+    GEOCODE_CACHE_FILENAME,
     LLM_ENRICH_BATCH_SIZE,
     NOMINATIM_BASE_URL,
     NOMINATIM_DELAY_SEC,
@@ -147,28 +150,27 @@ def _apply_result(event: Event, result: dict) -> Event:
     return event.model_copy(update=changes)
 
 
-_GEOCODE_CACHE_PATH = pathlib.Path.home() / ".luma" / "coordinates-to-city.json"
-
-
-def _load_disk_cache() -> dict[str, dict]:
+def _load_disk_cache(geocode_cache_path: pathlib.Path) -> dict[str, dict]:
     try:
-        with open(_GEOCODE_CACHE_PATH, encoding="utf-8") as f:
+        with open(geocode_cache_path, encoding="utf-8") as f:
             return json.load(f)
     except (OSError, json.JSONDecodeError):
         return {}
 
 
-def _save_disk_cache(cache: dict[str, dict]) -> None:
+def _save_disk_cache(cache: dict[str, dict], geocode_cache_path: pathlib.Path) -> None:
     try:
-        _GEOCODE_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(_GEOCODE_CACHE_PATH, "w", encoding="utf-8") as f:
+        geocode_cache_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(geocode_cache_path, "w", encoding="utf-8") as f:
             json.dump(cache, f, indent=2)
     except OSError as exc:
         print(f"Warning: could not save geocode cache: {exc}", file=sys.stderr)
 
 
-def _enrich_nominatim(events: list[Event]) -> tuple[list[Event], int]:
-    disk_cache = _load_disk_cache()
+def _enrich_nominatim(
+    events: list[Event], geocode_cache_path: pathlib.Path
+) -> tuple[list[Event], int]:
+    disk_cache = _load_disk_cache(geocode_cache_path)
     cache: dict[str, dict] = {}
     key_map: dict[int, str] = {}
     key_source: dict[str, Event] = {}
@@ -227,7 +229,7 @@ def _enrich_nominatim(events: list[Event]) -> tuple[list[Event], int]:
             dirty = True
 
     if dirty:
-        _save_disk_cache(disk_cache)
+        _save_disk_cache(disk_cache, geocode_cache_path)
 
     enriched_count = 0
     result_events = list(events)
@@ -400,6 +402,7 @@ def enrich_events(
     llm_config: LLMConfig | None,
     *,
     config_path: pathlib.Path | None = None,
+    cache_dir: pathlib.Path | None = None,
 ) -> list[Event]:
     """Enrich events with missing location data via Nominatim and LLM.
 
@@ -410,12 +413,15 @@ def enrich_events(
     if not candidates:
         return events
 
+    cdir = cache_dir if cache_dir is not None else DEFAULT_CACHE_DIR
+    geocode_cache_path = cdir / GEOCODE_CACHE_FILENAME
+
     needed = len(candidates)
     print(f"Enriching {needed} events with missing location data", file=sys.stderr)
-    events, geocoded = _enrich_nominatim(events)
+    events, geocoded = _enrich_nominatim(events, geocode_cache_path)
 
     if llm_config is None:
-        path = config_path or pathlib.Path("~/.luma/config.toml")
+        path = config_path or DEFAULT_CONFIG_PATH
         print(
             f"Skipping LLM enrichment: no API key configured."
             f" Set api_key in [llm.anthropic] section of {path}",

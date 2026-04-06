@@ -20,12 +20,13 @@ import luma.command_query as command_query
 import luma.command_refresh as command_refresh
 import luma.command_suggest as command_suggest
 from luma.config import (
-    DEFAULT_CACHE_DIR,
-    DEFAULT_CONFIG_PATH,
+    CACHE_SUBDIR,
+    CONFIG_FILENAME,
     DEFAULT_LUMA_DIR,
     DEFAULT_RETRIES,
     DEFAULT_SORT,
     FETCH_WINDOW_DAYS,
+    PREFERENCES_SUBDIR,
     TIMEZONE_NAME,
 )
 from luma.event_store import EventStore
@@ -165,7 +166,7 @@ def _resolve_date_subcmd(argv: list[str]) -> list[str]:
         "--to-date", end.strftime("%Y%m%d"),
     ] + rest
 
-    clean = [a for a in resolved if a not in ("--config", "--cache-dir") and not a.startswith("--config=") and not a.startswith("--cache-dir=")]
+    clean = [a for a in resolved if a != "--cache-dir" and not a.startswith("--cache-dir=")]
     _dim = "\033[2m" if sys.stderr.isatty() else ""
     _reset = "\033[0m" if sys.stderr.isatty() else ""
     print(f"{_dim}luma {' '.join(clean)}{_reset}", file=sys.stderr)
@@ -371,7 +372,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "\n"
             "  Prefix any with 'next-' for the following week (e.g. next-week, next-fri).\n"
             "\n"
-            "Configuration ~/.luma"
+            "Configuration: ~/.luma"
         ),
         formatter_class=argparse.RawTextHelpFormatter,
         add_help=False,
@@ -381,7 +382,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--cache-dir", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--json", action="store_true", dest="json_output", help=argparse.SUPPRESS)
     parser.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--config", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--provider", default=None, help=argparse.SUPPRESS)
     subparsers = parser.add_subparsers(dest="command")
     chat_parser = subparsers.add_parser("chat", help=argparse.SUPPRESS)
@@ -423,25 +423,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return _parse_with_query_text(parser, argv)
 
 
-def _extract_global_flags(argv: list[str]) -> tuple[str | None, str | None, str | None]:
-    """Scan *argv* for --config, --cache-dir, and --provider values without modifying it."""
-    config_path: str | None = None
-    cache_dir: str | None = None
+def _extract_global_flags(argv: list[str]) -> tuple[str | None, str | None]:
+    """Scan *argv* for --cache-dir and --provider without modifying it."""
+    luma_root: str | None = None
     provider: str | None = None
     for i, arg in enumerate(argv):
-        if arg == "--config" and i + 1 < len(argv):
-            config_path = argv[i + 1]
-        elif arg.startswith("--config="):
-            config_path = arg.split("=", 1)[1]
-        elif arg == "--cache-dir" and i + 1 < len(argv):
-            cache_dir = argv[i + 1]
+        if arg == "--cache-dir" and i + 1 < len(argv):
+            luma_root = argv[i + 1]
         elif arg.startswith("--cache-dir="):
-            cache_dir = arg.split("=", 1)[1]
+            luma_root = arg.split("=", 1)[1]
         elif arg == "--provider" and i + 1 < len(argv):
             provider = argv[i + 1]
         elif arg.startswith("--provider="):
             provider = arg.split("=", 1)[1]
-    return config_path, cache_dir, provider
+    return luma_root, provider
 
 
 def _resolve_sc(argv: list[str], config: dict, config_path: Path) -> list[str]:
@@ -454,9 +449,7 @@ def _resolve_sc(argv: list[str], config: dict, config_path: Path) -> list[str]:
             break
         if arg.startswith("-"):
             # Skip flags that consume a value
-            if arg in ("--config", "--cache-dir") or (
-                not arg.startswith("--") and len(arg) == 2
-            ):
+            if arg == "--cache-dir" or (not arg.startswith("--") and len(arg) == 2):
                 i += 2
                 continue
             if "=" in arg:
@@ -510,10 +503,10 @@ def _resolve_sc(argv: list[str], config: dict, config_path: Path) -> list[str]:
         if skip_next:
             skip_next = False
             continue
-        if a in ("--config", "--cache-dir"):
+        if a == "--cache-dir":
             skip_next = True
             continue
-        if a.startswith("--config=") or a.startswith("--cache-dir="):
+        if a.startswith("--cache-dir="):
             continue
         clean.append(a)
     _dim = "\033[2m" if sys.stderr.isatty() else ""
@@ -526,9 +519,13 @@ def main() -> int:
     _load_env_local()
     raw_argv = sys.argv[1:]
 
-    config_path_str, cache_dir_override, provider_override = _extract_global_flags(raw_argv)
+    luma_root_str, provider_override = _extract_global_flags(raw_argv)
 
-    config_path = Path(config_path_str) if config_path_str else DEFAULT_CONFIG_PATH
+    luma_root = Path(luma_root_str).expanduser() if luma_root_str else DEFAULT_LUMA_DIR
+    config_path = luma_root / CONFIG_FILENAME
+    events_cache_dir = luma_root / CACHE_SUBDIR
+    preferences_dir = luma_root / PREFERENCES_SUBDIR
+
     ensure_config(config_path)
     config = load_config(config_path)
     validate_config(config)
@@ -537,11 +534,8 @@ def main() -> int:
     argv = _resolve_date_subcmd(argv)
 
     args = parse_args(argv)
-    cache_dir = (
-        Path(args.cache_dir).expanduser() if args.cache_dir else DEFAULT_CACHE_DIR
-    )
-    store = EventStore(get_event_provider(config, cache_dir))
-    preferences = PreferenceStore(DiskPreferenceProvider(DEFAULT_LUMA_DIR))
+    store = EventStore(get_event_provider(config, events_cache_dir))
+    preferences = PreferenceStore(DiskPreferenceProvider(preferences_dir))
     if args.json_output and args.command in ("refresh", "chat", "like", "suggest"):
         print(f"--json is not supported with '{args.command}'.", file=sys.stderr)
         return 2
@@ -555,6 +549,7 @@ def main() -> int:
             llm_config=_llm_config(required=False),
             days=args.days,
             config_path=config_path,
+            cache_dir=events_cache_dir,
         )
     if args.command == "chat":
         return command_chat.run(store, preferences, _llm_config())
@@ -566,7 +561,14 @@ def main() -> int:
     has_date_filter = args.from_date is not None or args.to_date is not None or args.days is not None or args.range is not None
     if bare_form and not has_date_filter and args.min_guest is None:
         args.min_guest = 1
-    return command_query.run(args, store, cache_dir, preferences, _llm_config(required=False))
+    return command_query.run(
+        args,
+        store,
+        preferences_dir,
+        preferences,
+        _llm_config(required=False),
+        config_path=config_path,
+    )
 
 
 if __name__ == "__main__":

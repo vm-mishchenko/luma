@@ -18,6 +18,7 @@ def run(
     llm_config: LLMConfig | None,
     days: int | None = None,
     config_path: pathlib.Path | None = None,
+    cache_dir: pathlib.Path | None = None,
 ) -> int:
     try:
         count = refresh(
@@ -26,6 +27,7 @@ def run(
             llm_config=llm_config,
             days=days,
             config_path=config_path,
+            cache_dir=cache_dir,
         )
     except (urllib.error.URLError, urllib.error.HTTPError, OSError) as err:
         print(f"Error fetching events: {err}", file=sys.stderr)
