@@ -126,14 +126,33 @@ def test_refresh_success(tmp_path, capsys):
     assert rc == 0
     err = capsys.readouterr().err
     assert "Fetched 3 events" in err
+    assert "Example queries:" in err
+    assert "luma - show todays popular events" in err
+    assert "luma next-week --top 30" in err
+    assert "See all commands and options:" in err
+    assert "luma --help" in err
     assert (tmp_path / "cache" / "events.json").is_file()
+
+
+def test_refresh_success_empty_cache(tmp_path, capsys):
+    with mock.patch("luma.refresh.download_events", return_value=[]):
+        rc = _run_cli(["--cache-dir", str(tmp_path), "refresh"])
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "Fetched 0 events" in err
+    assert "Example queries:" in err
+    assert "luma next-week --top 30" in err
+    assert "See all commands and options:" in err
 
 
 def test_refresh_network_error(tmp_path, capsys):
     with mock.patch("luma.refresh.download_events", side_effect=OSError("net down")):
         rc = _run_cli(["--cache-dir", str(tmp_path), "refresh"])
     assert rc == 1
-    assert "net down" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "net down" in err
+    assert "See all commands and options:" not in err
+    assert "luma next-week --top 30" not in err
 
 
 def test_query_with_cache(tmp_path, capsys):

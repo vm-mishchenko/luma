@@ -10,6 +10,16 @@ from luma.event_store import EventStore
 from luma.refresh import refresh
 from luma.user_config import LLMConfig
 
+_NEXT_QUERY_HINT_LINES = (
+    "",
+    "Example queries:",
+    "  1. luma - show todays popular events",
+    "  2. luma next-week --top 30",
+    "",
+    "See all commands and options:",
+    "  luma --help",
+)
+
 
 def run(
     retries: int,
@@ -33,4 +43,6 @@ def run(
         print(f"Error fetching events: {err}", file=sys.stderr)
         return 1
     print(f"Fetched {count} events", file=sys.stderr)
+    for line in _NEXT_QUERY_HINT_LINES:
+        print(line, file=sys.stderr)
     return 0
