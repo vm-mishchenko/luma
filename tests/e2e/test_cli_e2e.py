@@ -160,29 +160,19 @@ def test_days_on_refresh(tmp_path):
     assert m.call_args.kwargs["end_utc"] - m.call_args.kwargs["start_utc"] == timedelta(days=7)
 
 
-def test_discard_writes_seen(tmp_path, capsys):
+def test_seen_json_ignored(tmp_path, capsys):
+    """Stale seen.json must not filter results or be modified by query."""
     _write_cache(tmp_path)
-    rc = _run_cli(["--cache-dir", str(tmp_path), "--discard", "--min-guest", "0"])
-    assert rc == 0
-    seen_path = tmp_path / "preferences" / "seen.json"
-    assert seen_path.is_file()
-    seen = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert len(seen) > 0
-
-
-def test_show_all_includes_seen(tmp_path, capsys):
-    _write_cache(tmp_path)
-
     seen_path = tmp_path / "preferences" / "seen.json"
     seen_path.parent.mkdir(parents=True, exist_ok=True)
-    seen_path.write_text(
-        json.dumps(["https://luma.com/ai-meetup"]), encoding="utf-8"
-    )
+    payload = json.dumps(["https://luma.com/ai-meetup"], indent=2)
+    seen_path.write_text(payload, encoding="utf-8")
 
-    rc = _run_cli(["--cache-dir", str(tmp_path), "--all", "--min-guest", "0"])
+    rc = _run_cli(["--cache-dir", str(tmp_path), "--min-guest", "0"])
     assert rc == 0
     out = capsys.readouterr().out
     assert "AI Meetup" in out
+    assert seen_path.read_text(encoding="utf-8") == payload
 
 
 # ---------------------------------------------------------------------------
@@ -409,16 +399,6 @@ def test_json_ignores_top(tmp_path, capsys):
     assert rc == 0
     data = json.loads(capsys.readouterr().out)
     assert len(data["events"]) == 3
-
-
-def test_json_discard(tmp_path, capsys):
-    _write_cache(tmp_path)
-    rc = _run_cli(["--cache-dir", str(tmp_path), "--json", "--discard", "--min-guest", "0"])
-    assert rc == 0
-    seen_path = tmp_path / "preferences" / "seen.json"
-    assert seen_path.is_file()
-    seen = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert set(seen) == {e.url for e in SAMPLE_EVENTS if e.guest_count >= 0}
 
 
 def test_json_no_cache_empty_stdout(tmp_path, capsys):
@@ -840,16 +820,6 @@ def test_query_subcommand_filters(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "AI Meetup" in out
     assert "Tech Talk" not in out
-
-
-def test_query_subcommand_discard(tmp_path, capsys):
-    _write_cache(tmp_path)
-    rc = _run_cli(["--cache-dir", str(tmp_path), "query", "--discard", "--min-guest", "0"])
-    assert rc == 0
-    seen_path = tmp_path / "preferences" / "seen.json"
-    assert seen_path.is_file()
-    seen = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert len(seen) > 0
 
 
 def test_bare_form_default_min_guest(tmp_path, capsys):

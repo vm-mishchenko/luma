@@ -69,19 +69,6 @@ luma "what events are happening this week?"
 luma --days 7 "AI meetups"
 ```
 
-Manage seen events:
-
-```shell
-# Mark displayed events as seen
-luma --discard
-
-# Show all including previously seen (grayed out)
-luma --all
-
-# Clear seen list
-luma --reset
-```
-
 Interactive chat:
 
 ```shell

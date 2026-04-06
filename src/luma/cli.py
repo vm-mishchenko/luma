@@ -114,7 +114,7 @@ def _date_subcmd_to_range(name: str, today: date) -> tuple[date, date]:
     return (target, target)
 
 
-_BOOLEAN_FLAGS = {"--json", "--debug", "--sf", "--discard", "--all", "--reset", "-h", "--help"}
+_BOOLEAN_FLAGS = {"--json", "--debug", "--sf", "-h", "--help"}
 
 
 def _resolve_date_subcmd(argv: list[str]) -> list[str]:
@@ -281,18 +281,6 @@ def _add_query_args(parser: argparse.ArgumentParser, *, hidden: bool = False) ->
     parser.add_argument(
         "--radius", type=float, default=None,
         help=_h("Search radius in miles (default: 5). Requires --lat and --lon."),
-    )
-    parser.add_argument(
-        "--discard", action="store_true",
-        help=_h("Mark all displayed events as seen. Mutually exclusive with --all and --reset."),
-    )
-    parser.add_argument(
-        "--all", action="store_true", dest="show_all",
-        help=_h("Show all events including previously discarded (seen ones are grayed out). Mutually exclusive with --discard."),
-    )
-    parser.add_argument(
-        "--reset", action="store_true",
-        help=_h("Clear the seen events list. Mutually exclusive with --discard."),
     )
 
 
@@ -564,7 +552,6 @@ def main() -> int:
     return command_query.run(
         args,
         store,
-        preferences_dir,
         preferences,
         _llm_config(required=False),
         config_path=config_path,

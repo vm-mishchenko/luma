@@ -21,7 +21,6 @@ from luma.config import (
     DEFAULT_WINDOW_DAYS,
     HARDCODED_LAT,
     HARDCODED_LON,
-    SEEN_FILENAME,
     TIMEZONE_NAME,
 )
 from luma.event_store import (
@@ -94,27 +93,6 @@ def _format_los_angeles_time(value: str) -> str:
     return f"{weekday} {month} {day}, {time_part}"
 
 
-def _load_seen_urls(preferences_dir: pathlib.Path) -> set[str]:
-    seen_file = preferences_dir / SEEN_FILENAME
-    if not seen_file.is_file():
-        return set()
-    try:
-        with open(seen_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, list):
-            return set(data)
-    except (json.JSONDecodeError, OSError):
-        pass
-    return set()
-
-
-def _save_seen_urls(urls: set[str], preferences_dir: pathlib.Path) -> None:
-    preferences_dir.mkdir(parents=True, exist_ok=True)
-    seen_file = preferences_dir / SEEN_FILENAME
-    with open(seen_file, "w", encoding="utf-8") as f:
-        json.dump(sorted(urls), f, indent=2)
-
-
 def _build_query_params(args: argparse.Namespace) -> QueryParams:
     city = "San Francisco" if args.sf else args.city
     return QueryParams(
@@ -131,7 +109,6 @@ def _build_query_params(args: argparse.Namespace) -> QueryParams:
         regex=args.regex,
         glob=args.glob,
         sort=args.sort,
-        show_all=args.show_all,
         city=city,
         region=args.region,
         country=args.country,
@@ -180,8 +157,6 @@ def _print_events(
     events: list[Event],
     *,
     sort: str,
-    show_all: bool = False,
-    seen_urls: set[str] | None = None,
 ) -> None:
     print(f"Top {len(events)} events (sorted by {sort}):")
     score_width = max(
@@ -193,7 +168,6 @@ def _print_events(
     )
     la_tz = ZoneInfo(TIMEZONE_NAME)
     bold = "\033[1m"
-    dim = "\033[2m"
     reset_ansi = "\033[0m"
     highlight_days = {1, 3}
     prev_iso_week: tuple[int, int] | None = None
@@ -211,9 +185,7 @@ def _print_events(
         score_text = f"[{score}]".ljust(score_width)
         date_text = start.ljust(date_width)
         line = f"{score_text} {date_text} | {item.title} | {item.url}"
-        if show_all and seen_urls and item.url in seen_urls:
-            line = f"{dim}{line}{reset_ansi}"
-        elif dt_la.weekday() in highlight_days:
+        if dt_la.weekday() in highlight_days:
             line = f"{bold}{line}{reset_ansi}"
         print(line)
 
@@ -221,28 +193,10 @@ def _print_events(
 def _query(
     args: argparse.Namespace,
     store: EventStore,
-    preferences_dir: pathlib.Path,
 ) -> int:
-    if args.discard and args.show_all:
-        print("--discard and --all are mutually exclusive.", file=sys.stderr)
-        return 2
-    if args.discard and args.reset:
-        print("--discard and --reset are mutually exclusive.", file=sys.stderr)
-        return 2
-
-    if args.reset:
-        seen_file = preferences_dir / SEEN_FILENAME
-        if seen_file.is_file():
-            seen_file.unlink()
-            print("Cleared seen events.", file=sys.stderr)
-        else:
-            print("No seen events to clear.", file=sys.stderr)
-
-    seen_urls = _load_seen_urls(preferences_dir)
-
     params = _build_query_params(args)
     try:
-        result = store.query(params, seen_urls=seen_urls)
+        result = store.query(params)
     except CacheError as e:
         print(str(e), file=sys.stderr)
         return 1
@@ -276,18 +230,10 @@ def _query(
     if args.json_output:
         output["type"] = "query"
         print(json.dumps(output, indent=2))
-        if args.discard:
-            new_seen = seen_urls | {e.url for e in result.events}
-            _save_seen_urls(new_seen, preferences_dir)
         return 0
 
     display = result.events[: args.top] if args.top else result.events
-    _print_events(display, sort=args.sort, show_all=args.show_all, seen_urls=seen_urls)
-
-    if args.discard:
-        new_seen = seen_urls | {e.url for e in display}
-        _save_seen_urls(new_seen, preferences_dir)
-        print(f"Marked {len(display)} events as seen.", file=sys.stderr)
+    _print_events(display, sort=args.sort)
 
     return 0
 
@@ -384,7 +330,6 @@ def _agent_query(args: argparse.Namespace, store: EventStore, preferences: "Pref
 def run(
     args: argparse.Namespace,
     store: EventStore,
-    preferences_dir: pathlib.Path,
     preferences: "PreferenceStore",
     llm_config: "LLMConfig | None",
     *,
@@ -400,4 +345,4 @@ def run(
             )
             return 2
         return _agent_query(args, store, preferences, llm_config)
-    return _query(args, store, preferences_dir)
+    return _query(args, store)

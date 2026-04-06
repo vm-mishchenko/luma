@@ -18,7 +18,6 @@ DEFAULT_WINDOW_DAYS = 1
 TIMEZONE_NAME = "America/Los_Angeles"
 
 EVENTS_FILENAME = "events.json"
-SEEN_FILENAME = "seen.json"
 LIKED_FILENAME = "liked.json"
 DISLIKED_FILENAME = "disliked.json"
 

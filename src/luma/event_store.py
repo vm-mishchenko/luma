@@ -59,7 +59,6 @@ class QueryParams(BaseModel):
     regex: str | None = Field(None, description="Regex pattern to match event titles (case-insensitive). Mutually exclusive with search and glob.")
     glob: str | None = Field(None, description="Glob pattern to match event titles (case-insensitive, e.g. '*AI*meetup*'). Mutually exclusive with search and regex.")
     sort: Literal["date", "guest"] = Field(DEFAULT_SORT, description="Sort by event date (default) or guest count.")
-    show_all: bool = False
     city: str | None = Field(None, description="Filter by city name (case-insensitive exact match). Mutually exclusive with search_lat/search_lon.")
     region: str | None = Field(None, description="Filter by region/state (case-insensitive exact match).")
     country: str | None = Field(None, description="Filter by country (case-insensitive exact match).")
@@ -263,14 +262,9 @@ class EventStore:
     def __init__(self, provider: EventProvider) -> None:
         self._provider = provider
 
-    def query(
-        self,
-        params: QueryParams,
-        *,
-        seen_urls: set[str] | None = None,
-    ) -> QueryResult:
+    def query(self, params: QueryParams) -> QueryResult:
         events = self._provider.load()
-        return _filter_and_sort_events(events, params, seen_urls=seen_urls)
+        return _filter_and_sort_events(events, params)
 
     def get_by_ids(self, ids: list[str]) -> list[Event]:
         events = self._provider.load()
@@ -288,8 +282,6 @@ class EventStore:
 def _filter_and_sort_events(
     events: list[Event],
     params: QueryParams,
-    *,
-    seen_urls: set[str] | None = None,
 ) -> QueryResult:
     """Filter, sort, and return events.  Pure function — no I/O."""
 
@@ -527,13 +519,6 @@ def _filter_and_sort_events(
                 x.title.lower(),
             )
         )
-
-    # -- seen-URL exclusion (after sort, matching original order) -------------
-
-    if seen_urls is not None and not params.show_all:
-        filtered = [
-            item for item in filtered if item.url not in seen_urls
-        ]
 
     return QueryResult(
         events=filtered,
