@@ -14,8 +14,8 @@ CONFIG_TEMPLATE = """\
 provider = "anthropic"
 
 [llm.anthropic]
-api_key = "sk-ant-..."
-model = "claude-sonnet-4-20250514"
+# api_key = ""  # Get your key at https://console.anthropic.com/
+# model = "claude-sonnet-4-20250514"
 
 # [llm.ollama]
 # host = "http://localhost:11434"
@@ -127,20 +127,34 @@ def validate_config(config: dict) -> None:
                 raise SystemExit(2)
 
 
-def get_llm_config(config: dict, provider_override: str | None = None) -> LLMConfig:
-    """Build LLMConfig from [llm] section in config."""
+def get_llm_config(
+    config: dict,
+    provider_override: str | None = None,
+    *,
+    required: bool = True,
+) -> LLMConfig | None:
+    """Build LLMConfig from [llm] section in config.
+
+    When *required* is False, returns None instead of exiting on missing config.
+    """
     llm = config.get("llm")
     if not llm or not isinstance(llm, dict):
+        if not required:
+            return None
         print("Error: Add [llm] section to config.toml.", file=sys.stderr)
         raise SystemExit(2)
 
     provider_name = provider_override or llm.get("provider")
     if not provider_name:
+        if not required:
+            return None
         print("Error: Set provider in [llm] section of config.toml.", file=sys.stderr)
         raise SystemExit(2)
 
     provider_block = llm.get(provider_name)
     if not provider_block or not isinstance(provider_block, dict):
+        if not required:
+            return None
         print(
             f"Error: [llm.{provider_name}] section not found in config.toml.",
             file=sys.stderr,
@@ -149,6 +163,8 @@ def get_llm_config(config: dict, provider_override: str | None = None) -> LLMCon
 
     model = provider_block.get("model")
     if not model:
+        if not required:
+            return None
         print(
             f"Error: Set model in [llm.{provider_name}] section of config.toml.",
             file=sys.stderr,
@@ -157,6 +173,8 @@ def get_llm_config(config: dict, provider_override: str | None = None) -> LLMCon
 
     api_key = provider_block.get("api_key")
     if provider_name == "anthropic" and not api_key:
+        if not required:
+            return None
         print(
             "Error: Set api_key in [llm.anthropic] section of config.toml.",
             file=sys.stderr,

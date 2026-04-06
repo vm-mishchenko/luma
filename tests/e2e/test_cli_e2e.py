@@ -265,11 +265,13 @@ def test_city_excludes_none(tmp_path, capsys):
 def test_free_text_prints_agent_response(tmp_path, capsys):
     from luma.agent.agent import FinalResult, TextResult
 
+    cfg = _write_config(tmp_path, _LLM_CONFIG_BLOCK)
+
     def _mock_query_iter(*args, **kwargs):
         yield FinalResult(result=TextResult(text="Here are your events."))
 
     with mock.patch("luma.agent.agent.Agent.query_iter", side_effect=_mock_query_iter):
-        rc = _run_cli(["--cache-dir", str(tmp_path), "hello"])
+        rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "hello"])
     assert rc == 0
     assert "Here are your events." in capsys.readouterr().out
 
@@ -277,11 +279,13 @@ def test_free_text_prints_agent_response(tmp_path, capsys):
 def test_free_text_with_flags(tmp_path, capsys):
     from luma.agent.agent import FinalResult, TextResult
 
+    cfg = _write_config(tmp_path, _LLM_CONFIG_BLOCK)
+
     def _mock_query_iter(*args, **kwargs):
         yield FinalResult(result=TextResult(text="Here are your events."))
 
     with mock.patch("luma.agent.agent.Agent.query_iter", side_effect=_mock_query_iter):
-        rc = _run_cli(["--cache-dir", str(tmp_path), "--days", "7", "hello"])
+        rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "--days", "7", "hello"])
     assert rc == 0
     assert "Here are your events." in capsys.readouterr().out
 
@@ -295,6 +299,7 @@ def test_empty_free_text_falls_through(tmp_path, capsys):
 def test_free_text_event_list_result(tmp_path, capsys):
     from luma.agent.agent import EventListResult, FinalResult
 
+    cfg = _write_config(tmp_path, _LLM_CONFIG_BLOCK)
     agent_events = [
         Event(
             id="evt-agent-a",
@@ -320,7 +325,7 @@ def test_free_text_event_list_result(tmp_path, capsys):
         yield FinalResult(result=EventListResult(ids=ids))
 
     with mock.patch("luma.agent.agent.Agent.query_iter", side_effect=_mock_query_iter):
-        rc = _run_cli(["--cache-dir", str(tmp_path), "find events"])
+        rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "find events"])
     assert rc == 0
     out = capsys.readouterr().out
     assert "Agent Event A" in out
@@ -330,11 +335,13 @@ def test_free_text_event_list_result(tmp_path, capsys):
 def test_free_text_agent_exception(tmp_path, capsys):
     from luma.agent.agent import AgentError
 
+    cfg = _write_config(tmp_path, _LLM_CONFIG_BLOCK)
+
     def _mock_query_iter(*args, **kwargs):
         raise AgentError("boom")
 
     with mock.patch("luma.agent.agent.Agent.query_iter", side_effect=_mock_query_iter):
-        rc = _run_cli(["--cache-dir", str(tmp_path), "hello"])
+        rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "hello"])
     assert rc == 1
     assert "boom" in capsys.readouterr().err
 
@@ -361,8 +368,10 @@ def test_json_query(tmp_path, capsys):
 def test_json_agent_text(tmp_path, capsys):
     from luma.agent.agent import TextResult
 
+    cfg = _write_config(tmp_path, _LLM_CONFIG_BLOCK)
+
     with mock.patch("luma.agent.agent.Agent.query", return_value=TextResult(text="hello response")):
-        rc = _run_cli(["--cache-dir", str(tmp_path), "--json", "hello"])
+        rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "--json", "hello"])
     assert rc == 0
     data = json.loads(capsys.readouterr().out)
     assert data["type"] == "text"
@@ -372,6 +381,7 @@ def test_json_agent_text(tmp_path, capsys):
 def test_json_agent_events(tmp_path, capsys):
     from luma.agent.agent import EventListResult
 
+    cfg = _write_config(tmp_path, _LLM_CONFIG_BLOCK)
     agent_events = [
         Event(
             id="evt-agent-a",
@@ -386,7 +396,7 @@ def test_json_agent_events(tmp_path, capsys):
     ids = [e.id for e in agent_events]
 
     with mock.patch("luma.agent.agent.Agent.query", return_value=EventListResult(ids=ids)):
-        rc = _run_cli(["--cache-dir", str(tmp_path), "--json", "find events"])
+        rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "--json", "find events"])
     assert rc == 0
     data = json.loads(capsys.readouterr().out)
     assert data["type"] == "events"
@@ -838,11 +848,13 @@ def test_query_subcommand_no_cache(tmp_path, capsys):
 def test_query_subcommand_free_text(tmp_path, capsys):
     from luma.agent.agent import FinalResult, TextResult
 
+    cfg = _write_config(tmp_path, _LLM_CONFIG_BLOCK)
+
     def _mock_query_iter(*args, **kwargs):
         yield FinalResult(result=TextResult(text="Here are your events."))
 
     with mock.patch("luma.agent.agent.Agent.query_iter", side_effect=_mock_query_iter):
-        rc = _run_cli(["--cache-dir", str(tmp_path), "query", "hello"])
+        rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "query", "hello"])
     assert rc == 0
     assert "Here are your events." in capsys.readouterr().out
 
@@ -904,11 +916,117 @@ def test_query_subcommand_no_default_min_guest(tmp_path, capsys):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# LLM key optional tests
+# ---------------------------------------------------------------------------
+
+_NO_LLM_CONFIG = ""
+
+_EMPTY_PROVIDER_CONFIG = """\
+[llm]
+provider = "anthropic"
+
+[llm.anthropic]
+"""
+
+
+def test_refresh_no_llm_section(tmp_path, capsys):
+    cfg = _write_config(tmp_path, _NO_LLM_CONFIG)
+    with mock.patch("luma.refresh.download_events", return_value=SAMPLE_EVENTS):
+        rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "refresh"])
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "Skipping LLM enrichment" in err
+    assert (tmp_path / "events.json").is_file()
+
+
+def test_refresh_empty_provider_block(tmp_path, capsys):
+    cfg = _write_config(tmp_path, _EMPTY_PROVIDER_CONFIG)
+    with mock.patch("luma.refresh.download_events", return_value=SAMPLE_EVENTS):
+        rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "refresh"])
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "Skipping LLM enrichment" in err
+
+
+def test_refresh_valid_key_runs_enrichment(tmp_path, capsys):
+    cfg = _write_config(tmp_path, _LLM_CONFIG_BLOCK)
+    with mock.patch("luma.refresh.download_events", return_value=SAMPLE_EVENTS):
+        rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "refresh"])
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "Skipping LLM enrichment" not in err
+
+
+def test_chat_no_key_fails(tmp_path, capsys):
+    cfg = _write_config(tmp_path, _NO_LLM_CONFIG)
+    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "chat"])
+    assert rc == 2
+    assert "Error" in capsys.readouterr().err
+
+
+def test_suggest_no_key_fails(tmp_path, capsys, monkeypatch):
+    cfg = _write_config(tmp_path, _NO_LLM_CONFIG)
+    _write_cache(tmp_path)
+    luma_dir = tmp_path / "luma"
+    _write_preferences(luma_dir, "liked.json", [SAMPLE_EVENTS[0]])
+    monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
+    monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
+    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "suggest"])
+    assert rc == 2
+    assert "Error" in capsys.readouterr().err
+
+
+def test_query_structured_no_key_works(tmp_path, capsys):
+    cfg = _write_config(tmp_path, _NO_LLM_CONFIG)
+    _write_cache(tmp_path)
+    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "query", "--min-guest", "0"])
+    assert rc == 0
+    assert "Top" in capsys.readouterr().out
+
+
+def test_query_free_text_no_key_fails(tmp_path, capsys):
+    cfg = _write_config(tmp_path, _NO_LLM_CONFIG)
+    _write_cache(tmp_path)
+    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "query", "hello"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "LLM API key required" in err
+    assert "~/.luma/config.toml" in err
+
+
+def test_config_template_commented_out(tmp_path, capsys):
+    cfg = tmp_path / "auto" / "config.toml"
+    assert not cfg.exists()
+    _write_cache(tmp_path)
+    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path)])
+    assert rc == 0
+    content = cfg.read_text(encoding="utf-8")
+    assert '# api_key = ""' in content
+    assert "# model = " in content
+    assert 'api_key = "sk-ant-..."' not in content
+
+
+def test_refresh_skip_message_shows_config_path(tmp_path, capsys):
+    cfg = _write_config(tmp_path, _NO_LLM_CONFIG)
+    with mock.patch("luma.refresh.download_events", return_value=SAMPLE_EVENTS):
+        rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "refresh"])
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert str(cfg) in err
+
+
+# ---------------------------------------------------------------------------
+# Suggest tests
+# ---------------------------------------------------------------------------
+
+
 def test_suggest_no_cache(tmp_path, capsys, monkeypatch):
+    cfg = _write_config(tmp_path, _LLM_CONFIG_BLOCK)
     luma_dir = tmp_path / "luma"
     monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
     monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
-    rc = _run_cli(["--cache-dir", str(tmp_path), "suggest"])
+    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "suggest"])
     assert rc == 1
     err = capsys.readouterr().err
     assert "luma refresh" in err
@@ -916,11 +1034,12 @@ def test_suggest_no_cache(tmp_path, capsys, monkeypatch):
 
 
 def test_suggest_no_likes(tmp_path, capsys, monkeypatch):
+    cfg = _write_config(tmp_path, _LLM_CONFIG_BLOCK)
     _write_cache(tmp_path)
     luma_dir = tmp_path / "luma"
     monkeypatch.setattr("luma.config.DEFAULT_LUMA_DIR", luma_dir)
     monkeypatch.setattr("luma.cli.DEFAULT_LUMA_DIR", luma_dir)
-    rc = _run_cli(["--cache-dir", str(tmp_path), "suggest"])
+    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "suggest"])
     assert rc == 1
     err = capsys.readouterr().err
     assert "luma like" in err
@@ -929,6 +1048,7 @@ def test_suggest_no_likes(tmp_path, capsys, monkeypatch):
 def test_suggest_success(tmp_path, capsys, monkeypatch):
     from luma.agent import EventListResult, FinalResult
 
+    cfg = _write_config(tmp_path, _LLM_CONFIG_BLOCK)
     _write_cache(tmp_path)
     luma_dir = tmp_path / "luma"
     _write_preferences(luma_dir, "liked.json", [SAMPLE_EVENTS[0]])
@@ -939,7 +1059,7 @@ def test_suggest_success(tmp_path, capsys, monkeypatch):
         yield FinalResult(result=EventListResult(ids=[SAMPLE_EVENTS[1].id]))
 
     monkeypatch.setattr("luma.agent.Agent.query_iter", _fake_query_iter)
-    rc = _run_cli(["--cache-dir", str(tmp_path), "suggest"])
+    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "suggest"])
     assert rc == 0
     out = capsys.readouterr().out
     assert "Tech Talk" in out
@@ -948,6 +1068,7 @@ def test_suggest_success(tmp_path, capsys, monkeypatch):
 def test_suggest_agent_error(tmp_path, capsys, monkeypatch):
     from luma.agent import AgentError
 
+    cfg = _write_config(tmp_path, _LLM_CONFIG_BLOCK)
     _write_cache(tmp_path)
     luma_dir = tmp_path / "luma"
     _write_preferences(luma_dir, "liked.json", [SAMPLE_EVENTS[0]])
@@ -958,6 +1079,6 @@ def test_suggest_agent_error(tmp_path, capsys, monkeypatch):
         raise AgentError("API failed")
 
     monkeypatch.setattr("luma.agent.Agent.query_iter", _raise_error)
-    rc = _run_cli(["--cache-dir", str(tmp_path), "suggest"])
+    rc = _run_cli(["--config", str(cfg), "--cache-dir", str(tmp_path), "suggest"])
     assert rc == 1
     assert "API failed" in capsys.readouterr().err

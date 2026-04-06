@@ -385,8 +385,15 @@ def run(
     store: EventStore,
     cache_dir: pathlib.Path,
     preferences: "PreferenceStore",
-    llm_config: "LLMConfig",
+    llm_config: "LLMConfig | None",
 ) -> int:
     if args.query_text:
+        if llm_config is None:
+            print(
+                "Error: LLM API key required for free-text queries."
+                " Configure api_key in ~/.luma/config.toml.",
+                file=sys.stderr,
+            )
+            return 2
         return _agent_query(args, store, preferences, llm_config)
     return _query(args, store, cache_dir)

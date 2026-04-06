@@ -395,8 +395,17 @@ def _enrich_llm(events: list[Event], llm_config: LLMConfig) -> tuple[list[Event]
 # Public API
 # ---------------------------------------------------------------------------
 
-def enrich_events(events: list[Event], llm_config: LLMConfig) -> list[Event]:
-    """Enrich events with missing location data via Nominatim and LLM."""
+def enrich_events(
+    events: list[Event],
+    llm_config: LLMConfig | None,
+    *,
+    config_path: pathlib.Path | None = None,
+) -> list[Event]:
+    """Enrich events with missing location data via Nominatim and LLM.
+
+    When *llm_config* is None, only Nominatim geocoding runs and LLM
+    enrichment is skipped with a message to stderr.
+    """
     candidates = [ev for ev in events if _is_candidate(ev)]
     if not candidates:
         return events
@@ -404,7 +413,17 @@ def enrich_events(events: list[Event], llm_config: LLMConfig) -> list[Event]:
     needed = len(candidates)
     print(f"Enriching {needed} events with missing location data", file=sys.stderr)
     events, geocoded = _enrich_nominatim(events)
-    events, inferred = _enrich_llm(events, llm_config)
+
+    if llm_config is None:
+        path = config_path or pathlib.Path("~/.luma/config.toml")
+        print(
+            f"Skipping LLM enrichment: no API key configured."
+            f" Set api_key in [llm.anthropic] section of {path}",
+            file=sys.stderr,
+        )
+        inferred = 0
+    else:
+        events, inferred = _enrich_llm(events, llm_config)
 
     unresolved = needed - geocoded - inferred
     print(

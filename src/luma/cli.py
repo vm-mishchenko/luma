@@ -546,11 +546,16 @@ def main() -> int:
         print(f"--json is not supported with '{args.command}'.", file=sys.stderr)
         return 2
 
-    def _llm_config():
-        return get_llm_config(config, provider_override=provider_override)
+    def _llm_config(required=True):
+        return get_llm_config(config, provider_override=provider_override, required=required)
 
     if args.command == "refresh":
-        return command_refresh.run(args.retries, store, llm_config=_llm_config(), days=args.days)
+        return command_refresh.run(
+            args.retries, store,
+            llm_config=_llm_config(required=False),
+            days=args.days,
+            config_path=config_path,
+        )
     if args.command == "chat":
         return command_chat.run(store, preferences, _llm_config())
     if args.command == "like":
@@ -561,7 +566,7 @@ def main() -> int:
     has_date_filter = args.from_date is not None or args.to_date is not None or args.days is not None or args.range is not None
     if bare_form and not has_date_filter and args.min_guest is None:
         args.min_guest = 1
-    return command_query.run(args, store, cache_dir, preferences, _llm_config())
+    return command_query.run(args, store, cache_dir, preferences, _llm_config(required=False))
 
 
 if __name__ == "__main__":
