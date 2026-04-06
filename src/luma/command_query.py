@@ -167,9 +167,6 @@ def _print_events(
         default=0,
     )
     la_tz = ZoneInfo(TIMEZONE_NAME)
-    bold = "\033[1m"
-    reset_ansi = "\033[0m"
-    highlight_days = {1, 3}
     prev_iso_week: tuple[int, int] | None = None
     for item in events:
         dt_la = parse_iso8601_utc(item.start_at).astimezone(la_tz)
@@ -184,10 +181,7 @@ def _print_events(
         score = item.guest_count
         score_text = f"[{score}]".ljust(score_width)
         date_text = start.ljust(date_width)
-        line = f"{score_text} {date_text} | {item.title} | {item.url}"
-        if dt_la.weekday() in highlight_days:
-            line = f"{bold}{line}{reset_ansi}"
-        print(line)
+        print(f"{score_text} {date_text} | {item.title} | {item.url}")
 
 
 def _query(
