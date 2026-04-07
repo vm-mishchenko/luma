@@ -8,39 +8,54 @@ A CLI tool to query and browse Luma events.
 - Run `make setup` and put the venv on your PATH (the command prints where it is)
 - Nuclear option: `make clean && make setup`
 
-## Usage
+## Quick start
 
-Pull fresh events into the local cache:
+Start by fetching events: `luma refresh`.
+
+Check what's happening today with `luma`, or look ahead with `luma week`.
+
+Too much noise? Add filters: `luma next-week --day tue,thu --min-time 18`.
+
+Still not finding what you want? Ask in plain English: `luma next-week "AI meetups"` (needs an LLM key in config).
+
+## Commands
+
+Commands:
+
+- `luma` -- show today's popular events
+- `luma refresh` -- fetch fresh events from Luma
+- `luma query` -- query events with filters
+- `luma like` -- like or dislike events interactively
+- `luma suggest` -- get personalized event suggestions
+- `luma sc` -- run a saved shortcut
+
+Date shortcuts:
+
+- `luma today` -- events for today
+- `luma tomorrow` -- events for tomorrow
+- `luma week` -- remaining events this week
+- `luma weekday` -- remaining weekday events this week
+- `luma weekend` -- weekend events this week
+- `luma mon` -- events for Monday
+- `luma tue` -- events for Tuesday
+- `luma wed` -- events for Wednesday
+- `luma thu` -- events for Thursday
+- `luma fri` -- events for Friday
+- `luma sat` -- events for Saturday
+- `luma sun` -- events for Sunday
+
+Prefix any date shortcut with `next-` for the following week:
+
+- `luma next-week` -- all events next week
+- `luma next-weekday` -- next week's weekday events
+- `luma next-weekend` -- next weekend's events
+- `luma next-mon`, `luma next-tue`, ... `luma next-sun` -- that day next week
+
+Free-text questions go through the agent (requires an LLM API key in config):
 
 ```shell
-luma refresh
+luma next-week --top 50 "agent infra meetups skip social events"
 ```
-
-Browse what is cached (default is about the next two weeks, top 100, sorted by date):
-
-```shell
-luma
-luma next-week --min-guest 100
-luma --days 7 --top 50
-luma --sort guest --min-guest 100
-luma --search 'AI' --day Tue,Thu
-luma --min-time 18 --max-time 21
-```
-
-Free-text questions go through the agent (same flags still apply):
-
-```shell
-luma "what events are happening this week?"
-luma --days 7 "AI meetups"
-```
-
-Interactive chat:
-
-```shell
-luma chat
-```
-
-Everything else (flags, subcommands): `luma --help`.
 
 ## Configuration
 
