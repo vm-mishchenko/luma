@@ -352,7 +352,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "  luma like      Like or dislike events interactively.\n"
             "  luma suggest   Get personalized event suggestions.\n"
             "  luma sc        Run a saved shortcut.\n"
-            "  luma chat      Interactive chat with Luma assistant.\n"
             "\n"
             "Date subcommands:\n"
             "  luma today|tomorrow              Events for today or tomorrow.\n"
@@ -361,8 +360,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "\n"
             "  Prefix any with 'next-' for the following week (e.g. next-week, next-fri).\n"
             "\n"
-            "Configuration: ~/.luma/config.toml (LLM, refresh sources, shortcuts).\n"
-            "Edit [refresh] in that file to change which Luma categories and calendars refresh uses."
+            "Configuration: ~/.luma/config.toml (LLM, refresh sources, shortcuts)."
         ),
         formatter_class=argparse.RawTextHelpFormatter,
         add_help=False,

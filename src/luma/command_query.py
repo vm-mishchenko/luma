@@ -333,8 +333,8 @@ def run(
         if llm_config is None:
             cfg = config_path if config_path is not None else DEFAULT_CONFIG_PATH
             print(
-                "Error: LLM API key required for free-text queries."
-                f" Configure api_key in {cfg}.",
+                "Error: Anthropic API key required for free-text queries."
+                f" Configure api_key in [llm.anthropic] section of {cfg}.",
                 file=sys.stderr,
             )
             return 2
