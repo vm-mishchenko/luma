@@ -19,8 +19,6 @@ from typing import Any
 
 from luma.config import (
     API_BASE,
-    HARDCODED_LAT,
-    HARDCODED_LON,
     PAGINATION_LIMIT,
     REQUEST_DELAY_SEC,
 )
@@ -178,6 +176,8 @@ def _event_from_entry(entry: dict[str, Any], source: str) -> Event | None:
 def _fetch_category_events(
     category_slug: str,
     *,
+    latitude: str,
+    longitude: str,
     start_utc: datetime,
     end_utc: datetime,
     retries: int,
@@ -189,8 +189,8 @@ def _fetch_category_events(
 
     while True:
         params = {
-            "latitude": HARDCODED_LAT,
-            "longitude": HARDCODED_LON,
+            "latitude": latitude,
+            "longitude": longitude,
             "pagination_limit": PAGINATION_LIMIT,
             "slug": category_slug,
         }
@@ -314,6 +314,8 @@ def download_events(
     end_utc: datetime,
     category_urls: list[str],
     calendars: list[dict[str, str | None]],
+    latitude: str,
+    longitude: str,
 ) -> list[Event]:
     """Fetch events from all configured sources and return deduplicated list."""
     all_events: list[Event] = []
@@ -322,7 +324,7 @@ def download_events(
     for slug in category_slugs:
         print(f"Fetching category events: {slug}", file=sys.stderr)
         all_events.extend(
-            _fetch_category_events(slug, start_utc=start_utc, end_utc=end_utc, retries=retries)
+            _fetch_category_events(slug, latitude=latitude, longitude=longitude, start_utc=start_utc, end_utc=end_utc, retries=retries)
         )
 
     for cal in calendars:
@@ -359,7 +361,7 @@ def download_events(
         else:
             print(f"Fetching discover events via slug fallback: {slug}", file=sys.stderr)
             all_events.extend(
-                _fetch_category_events(slug, start_utc=start_utc, end_utc=end_utc, retries=retries)
+                _fetch_category_events(slug, latitude=latitude, longitude=longitude, start_utc=start_utc, end_utc=end_utc, retries=retries)
             )
 
     return _dedupe_by_url(all_events)

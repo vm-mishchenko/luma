@@ -35,6 +35,7 @@ from luma.user_config import (
     ensure_config,
     get_event_provider,
     get_llm_config,
+    get_location,
     get_refresh_sources,
     get_shortcuts,
     load_config,
@@ -517,6 +518,7 @@ def main() -> int:
     ensure_config(config_path)
     config = load_config(config_path)
     validate_config(config)
+    latitude, longitude = get_location(config)
 
     argv = _resolve_sc(raw_argv, config, config_path)
     argv = _resolve_date_subcmd(argv)
@@ -538,6 +540,8 @@ def main() -> int:
             llm_config=_llm_config(required=False),
             category_urls=cat_urls,
             calendars=cals,
+            latitude=latitude,
+            longitude=longitude,
             days=args.days,
             config_path=config_path,
             cache_dir=events_cache_dir,
@@ -557,6 +561,8 @@ def main() -> int:
         store,
         preferences,
         _llm_config(required=False),
+        latitude=latitude,
+        longitude=longitude,
         config_path=config_path,
     )
 

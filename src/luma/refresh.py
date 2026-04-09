@@ -34,6 +34,8 @@ def refresh(
     llm_config: LLMConfig | None,
     category_urls: list[str],
     calendars: list[dict[str, str | None]],
+    latitude: str,
+    longitude: str,
     days: int | None = None,
     config_path: pathlib.Path | None = None,
     cache_dir: pathlib.Path | None = None,
@@ -53,6 +55,8 @@ def refresh(
         end_utc=end_utc,
         category_urls=category_urls,
         calendars=calendars,
+        latitude=latitude,
+        longitude=longitude,
     )
     events = enrich_events(
         events, llm_config, config_path=config_path, cache_dir=cache_dir

@@ -19,8 +19,6 @@ if TYPE_CHECKING:
 from luma.config import (
     DEFAULT_CONFIG_PATH,
     DEFAULT_WINDOW_DAYS,
-    HARDCODED_LAT,
-    HARDCODED_LON,
     TIMEZONE_NAME,
 )
 from luma.event_store import (
@@ -187,6 +185,9 @@ def _print_events(
 def _query(
     args: argparse.Namespace,
     store: EventStore,
+    *,
+    latitude: str,
+    longitude: str,
 ) -> int:
     params = _build_query_params(args)
     try:
@@ -216,8 +217,8 @@ def _query(
         "min_time": args.min_time,
         "max_time": args.max_time,
         "dedupe_by": "url",
-        "lat": HARDCODED_LAT,
-        "lon": HARDCODED_LON,
+        "lat": latitude,
+        "lon": longitude,
         "total_events_after_dedupe": result.total_after_filter,
         "events": [e.model_dump() for e in result.events],
     }
@@ -327,6 +328,8 @@ def run(
     preferences: "PreferenceStore",
     llm_config: "LLMConfig | None",
     *,
+    latitude: str,
+    longitude: str,
     config_path: pathlib.Path | None = None,
 ) -> int:
     if args.query_text:
@@ -339,4 +342,4 @@ def run(
             )
             return 2
         return _agent_query(args, store, preferences, llm_config)
-    return _query(args, store)
+    return _query(args, store, latitude=latitude, longitude=longitude)

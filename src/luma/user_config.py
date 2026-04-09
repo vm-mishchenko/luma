@@ -9,6 +9,9 @@ import tomllib
 from dataclasses import dataclass
 
 
+DEFAULT_LATITUDE = 37.33939
+DEFAULT_LONGITUDE = -121.89496
+
 DEFAULT_REFRESH_CATEGORIES: tuple[str, ...] = (
     "https://luma.com/ai",
     "https://luma.com/tech",
@@ -41,10 +44,12 @@ def _format_default_refresh_toml() -> str:
 
 
 CONFIG_TEMPLATE = """\
-[llm]
-provider = "anthropic"
+# LLM provider for free-text queries and suggestions.
+# Requires an API key from the chosen provider.
+# [llm]
+# provider = "anthropic"
 
-[llm.anthropic]
+# [llm.anthropic]
 # api_key = ""  # Get your key at https://console.anthropic.com/
 # model = "claude-sonnet-4-20250514"
 
@@ -53,19 +58,28 @@ provider = "anthropic"
 # model = "llama3.1"
 # timeout = 120
 
+# Event storage backend. Default: local disk cache.
 # [storage]
 # provider = "mongo"
 # [storage.mongo]
 # connection_string = "mongodb://localhost:27017"
 # database = "luma"
 
-# Shortcuts: named queries callable via 'luma sc <name>'
+# Named queries callable via 'luma sc <name>'.
 # Each shortcut is an array of CLI arguments.
-# Example:
 # [shortcuts]
 # popular = ["--sort", "guest", "--min-guest", "100"]
 # tomorrow = ["--range", "tomorrow"]
 # weekend = ["--range", "weekend"]
+
+# Coordinates used for category discovery during 'luma refresh'.
+# Default: San Jose, CA. Change to your city to get locally relevant events.
+[location]
+latitude = """ + str(DEFAULT_LATITUDE) + """
+longitude = """ + str(DEFAULT_LONGITUDE) + """
+
+# Event sources to fetch during 'luma refresh'.
+# Categories are Luma discover pages; calendars are specific organizer pages.
 """ + _format_default_refresh_toml()
 
 _SHORTCUT_NAME_RE = re.compile(r"^[a-zA-Z0-9-]+$")
@@ -157,6 +171,32 @@ def validate_config(config: dict) -> None:
                 print("Error: Set database in [storage.mongo].", file=sys.stderr)
                 raise SystemExit(2)
 
+    location = config.get("location")
+    if location is not None:
+        if not isinstance(location, dict):
+            print("Error: [location] must be a table.", file=sys.stderr)
+            raise SystemExit(2)
+        for field, lo, hi in (
+            ("latitude", -90, 90),
+            ("longitude", -180, 180),
+        ):
+            if field not in location:
+                print(f"Error: [location].{field} is required.", file=sys.stderr)
+                raise SystemExit(2)
+            val = location[field]
+            if not isinstance(val, (int, float)):
+                print(
+                    f"Error: [location].{field} must be a number, got {val!r}.",
+                    file=sys.stderr,
+                )
+                raise SystemExit(2)
+            if not (lo <= val <= hi):
+                print(
+                    f"Error: [location].{field} = {val} is out of range ({lo} to {hi}).",
+                    file=sys.stderr,
+                )
+                raise SystemExit(2)
+
     refresh = config.get("refresh")
     if refresh is not None:
         if not isinstance(refresh, dict):
@@ -242,6 +282,14 @@ def get_refresh_sources(config: dict) -> tuple[list[str], list[dict[str, str | N
     categories = _dedupe_category_urls(categories)
     calendars = _dedupe_calendars(calendars)
     return categories, calendars
+
+
+def get_location(config: dict) -> tuple[str, str]:
+    """Return (latitude, longitude) as strings from [location] or defaults."""
+    location = config.get("location")
+    if location is None:
+        return str(DEFAULT_LATITUDE), str(DEFAULT_LONGITUDE)
+    return str(location["latitude"]), str(location["longitude"])
 
 
 def get_llm_config(
