@@ -33,6 +33,7 @@ from luma.event_store import EventStore
 from luma.preference_store import DiskPreferenceProvider, PreferenceStore
 from luma.user_config import (
     ensure_config,
+    ensure_geocode_cache,
     get_event_provider,
     get_llm_config,
     get_location,
@@ -516,6 +517,7 @@ def main() -> int:
     preferences_dir = luma_root / PREFERENCES_SUBDIR
 
     ensure_config(config_path)
+    ensure_geocode_cache(events_cache_dir)
     config = load_config(config_path)
     validate_config(config)
     latitude, longitude = get_location(config)

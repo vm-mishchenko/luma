@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import importlib.resources
 import pathlib
 import re
 import sys
 import tomllib
 from dataclasses import dataclass
+
+from luma.config import GEOCODE_CACHE_FILENAME
 
 
 DEFAULT_LATITUDE = 37.33939
@@ -101,6 +104,21 @@ def ensure_config(path: pathlib.Path) -> None:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(CONFIG_TEMPLATE, encoding="utf-8")
+
+
+def ensure_geocode_cache(cache_dir: pathlib.Path) -> None:
+    """Seed geocode cache from bundled data if no user cache exists yet."""
+    target = cache_dir / GEOCODE_CACHE_FILENAME
+    if target.exists():
+        return
+    bundled = importlib.resources.files("luma.data") / GEOCODE_CACHE_FILENAME
+    if not bundled.is_file():
+        return
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(bundled.read_bytes())
+    except OSError as exc:
+        print(f"Warning: could not seed geocode cache: {exc}", file=sys.stderr)
 
 
 def load_config(path: pathlib.Path) -> dict:

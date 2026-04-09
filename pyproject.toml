@@ -16,6 +16,7 @@ luma = "luma.cli:main"
 
 [tool.setuptools.package-data]
 "luma.agent" = ["prompts/*.md"]
+"luma.data" = ["*.json"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

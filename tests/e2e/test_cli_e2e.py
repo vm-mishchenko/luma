@@ -942,7 +942,7 @@ def test_query_free_text_no_key_fails(tmp_path, capsys):
     rc = _run_cli(["--cache-dir", str(tmp_path), "query", "hello"])
     assert rc == 2
     err = capsys.readouterr().err
-    assert "LLM API key required" in err
+    assert "API key required" in err
     assert str(tmp_path / "config.toml") in err
 
 

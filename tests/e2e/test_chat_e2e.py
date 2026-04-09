@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pexpect
@@ -12,8 +13,23 @@ import pexpect
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC_DIR = REPO_ROOT / "src"
 
+_CHAT_CONFIG = """\
+[llm]
+provider = "anthropic"
+
+[llm.anthropic]
+api_key = "test-key"
+model = "claude-sonnet-4-20250514"
+
+[location]
+latitude = 37.33939
+longitude = -121.89496
+"""
+
 
 def _spawn_chat(timeout: int = 8) -> pexpect.spawn:
+    tmp_dir = tempfile.mkdtemp(prefix="luma-chat-test-")
+    Path(tmp_dir, "config.toml").write_text(_CHAT_CONFIG, encoding="utf-8")
     env = os.environ.copy()
     existing_pythonpath = env.get("PYTHONPATH")
     env["PYTHONPATH"] = (
@@ -23,7 +39,7 @@ def _spawn_chat(timeout: int = 8) -> pexpect.spawn:
     )
     child = pexpect.spawn(
         sys.executable,
-        ["-m", "luma.cli", "chat"],
+        ["-m", "luma.cli", "--cache-dir", tmp_dir, "chat"],
         cwd=str(REPO_ROOT),
         env=env,
         encoding="utf-8",
