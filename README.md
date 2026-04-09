@@ -1,6 +1,8 @@
 # luma
 
-A CLI tool to query and browse Luma events.
+A CLI tool to query and browse [Luma](https://luma.com) events.
+
+![luma CLI](assets/luma.png)
 
 ## Install
 
